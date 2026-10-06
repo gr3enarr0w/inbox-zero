@@ -59,6 +59,7 @@ export class SmarterMailDraftsProvider extends SmarterMailMutationsProvider {
     const folder = await this.systemFolder("DRAFT");
     if (reference.folder !== folder) return null;
     const payload = await this.client.request("message", reference);
+    currentDraftUid(payload, folder, reference);
     return {
       id: smarterMailDraftId({
         mid: (payload as { messageData?: { mid?: unknown } }).messageData?.mid,
@@ -66,16 +67,17 @@ export class SmarterMailDraftsProvider extends SmarterMailMutationsProvider {
     };
   }
   async getDraft(id: string) {
-    if (!id.startsWith("sm-draft:")) return super.getDraft(id);
     const folder = await this.systemFolder("DRAFT");
-    const payload = await this.client.request("message", {
-      folder,
-      mid: smarterMailDraftMid(id),
-    });
+    const reference = id.startsWith("sm-draft:")
+      ? { folder, mid: smarterMailDraftMid(id) }
+      : parseSmarterMailMessageId(id);
+    if (reference.folder !== folder)
+      throw new Error("Message is not a SmarterMail draft");
+    const payload = await this.client.request("message", reference);
     return normalizeSmarterMailMessage(
       payload,
       folder,
-      currentDraftUid(payload, folder),
+      currentDraftUid(payload, folder, reference),
     );
   }
   async deleteDraft(id: string) {

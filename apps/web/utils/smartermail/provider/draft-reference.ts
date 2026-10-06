@@ -16,8 +16,25 @@ export function smarterMailDraftMid(id: string) {
   return Number(id.slice(9));
 }
 
-export function currentDraftUid(payload: unknown, _folder: string) {
+export function currentDraftUid(
+  payload: unknown,
+  folder: string,
+  expected: { uid?: number; mid?: number } = {},
+) {
   return z
-    .object({ messageData: z.object({ uid: z.number().int().positive() }) })
+    .object({
+      messageData: z.object({
+        uid:
+          expected.uid === undefined
+            ? z.number().int().positive()
+            : z.literal(expected.uid),
+        mid:
+          expected.mid === undefined
+            ? z.number().int().positive().optional()
+            : z.literal(expected.mid),
+        folder: z.literal(folder),
+        isDraft: z.literal(true),
+      }),
+    })
     .parse(payload).messageData.uid;
 }
