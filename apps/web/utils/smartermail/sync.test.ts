@@ -315,4 +315,57 @@ describe("SmarterMail polling", () => {
     ).toBe(56);
     expect(inbox).toEqual([]);
   });
+  it.each([
+    "malformed",
+    "presence",
+    "message",
+  ])("continues past a queued %s failure without running its rules", async (failure) => {
+    prisma.smarterMailSyncState.findUniqueOrThrow.mockResolvedValue({
+      cursor: "process",
+      failures: 0,
+    } as never);
+    const badId =
+      failure === "malformed" ? "invalid" : smarterMailMessageId("Inbox", 2);
+    prisma.smarterMailSyncMessage.findMany.mockResolvedValue([
+      { messageId: badId, messageKey: "bad" },
+      {
+        messageId: message.id,
+        messageKey: getSmarterMailSyncMessageKey(message),
+      },
+    ] as never);
+    const hasMessagesInFolder = vi.fn().mockResolvedValue([message.id]);
+    const getMessage = vi.fn().mockResolvedValue(message);
+    if (failure === "presence")
+      hasMessagesInFolder.mockRejectedValueOnce(
+        new Error("presence unavailable"),
+      );
+    if (failure === "message")
+      getMessage.mockRejectedValueOnce(new Error("read unavailable"));
+    vi.mocked(createEmailProvider).mockResolvedValue({
+      getMessage,
+      hasMessagesInFolder,
+    } as never);
+    const result = await syncSmarterMailAccount("account", logger);
+    expect(result).toMatchObject({ processed: 1 });
+    expect(runRules).toHaveBeenCalledOnce();
+    expect(vi.mocked(runRules).mock.calls[0][0].message.id).toBe(message.id);
+    expect(prisma.smarterMailSyncMessage.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          emailAccountId: "account",
+          messageKey: "bad",
+          status: "queued",
+          emailAccount: expect.objectContaining({
+            smarterMailSyncState: expect.objectContaining({
+              leaseToken: expect.any(String),
+              leaseUntil: { gt: expect.any(Date) },
+            }),
+          }),
+        }),
+        data: expect.objectContaining({
+          status: failure === "malformed" ? "skipped" : "retry_ready",
+        }),
+      }),
+    );
+  });
 });

@@ -10,6 +10,7 @@ import { parseSmarterMailMessageId } from "@/utils/smartermail/message";
 import { getWebhookEmailAccount } from "@/utils/webhook/validate-webhook-account";
 import { getUserTier, hasAiAccess } from "@/utils/premium";
 import type { Logger } from "@/utils/logger";
+import type { ParsedMessage } from "@/utils/types";
 
 const PAGE_SIZE = 25;
 const LEASE_MS = 10 * 60 * 1000;
@@ -139,17 +140,26 @@ export async function syncSmarterMailAccount(
         data: { leaseUntil: new Date(Date.now() + LEASE_MS) },
       });
       if (!renewed.count) return { skipped: true };
-      const { folder } = parseSmarterMailMessageId(pending.messageId);
-      const present =
-        (await provider.hasMessagesInFolder(folder, [pending.messageId]))
-          .length > 0;
-      const message = present
-        ? await provider.getMessage(pending.messageId)
-        : null;
-      if (
-        !message ||
-        getSmarterMailSyncMessageKey(message) !== pending.messageKey
-      ) {
+      let message: ParsedMessage | null = null;
+      let failureStatus = "skipped";
+      try {
+        const { folder } = parseSmarterMailMessageId(pending.messageId);
+        failureStatus = "retry_ready";
+        const present =
+          (await provider.hasMessagesInFolder(folder, [pending.messageId]))
+            .length > 0;
+        message = present ? await provider.getMessage(pending.messageId) : null;
+        if (
+          message &&
+          getSmarterMailSyncMessageKey(message) !== pending.messageKey
+        )
+          message = null;
+        failureStatus = "skipped";
+      } catch {
+        // These reads precede claiming the message or starting any rule actions.
+        message = null;
+      }
+      if (!message) {
         await prisma.smarterMailSyncMessage.updateMany({
           where: {
             emailAccountId,
@@ -163,7 +173,7 @@ export async function syncSmarterMailAccount(
               },
             },
           },
-          data: { status: "skipped", processedAt: new Date() },
+          data: { status: failureStatus, processedAt: new Date() },
         });
         continue;
       }
