@@ -1,3 +1,5 @@
+import { getSmarterMailClientForEmail } from "@/utils/smartermail/account";
+import { SmarterMailProvider } from "@/utils/email/smartermail";
 import {
   getGmailClientForEmail,
   getOutlookClientForEmail,
@@ -35,6 +37,14 @@ export async function createEmailProvider({
       const client = await getGmailClientForEmail({ emailAccountId, logger });
       return withProviderFailureLogging(
         new GmailProvider(client, logger, emailAccountId),
+        { emailAccountId, provider: rateLimitProvider, logger },
+      );
+    }
+
+    if (rateLimitProvider === "smartermail") {
+      const client = await getSmarterMailClientForEmail({ emailAccountId });
+      return withProviderFailureLogging(
+        new SmarterMailProvider(client, logger, emailAccountId),
         { emailAccountId, provider: rateLimitProvider, logger },
       );
     }
@@ -81,7 +91,7 @@ function withProviderFailureLogging(
     logger,
   }: {
     emailAccountId: string;
-    provider: "google" | "microsoft";
+    provider: EmailProvider["name"];
     logger: Logger;
   },
 ): EmailProvider {
@@ -153,7 +163,7 @@ async function logProviderOperationFailure({
 }: {
   error: unknown;
   emailAccountId: string;
-  provider: "google" | "microsoft";
+  provider: EmailProvider["name"];
   logger: Logger;
   operation: string;
   failedAccessToken?: string;
@@ -208,7 +218,7 @@ async function recordProviderIssueSafely({
 type ProviderOperationFailureLogInput = {
   error: unknown;
   emailAccountId: string;
-  provider: "google" | "microsoft";
+  provider: EmailProvider["name"];
   logger: Logger;
   operation: string;
   failedAccessToken?: string;

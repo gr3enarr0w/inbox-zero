@@ -9,6 +9,7 @@ import { MutedText } from "@/components/Typography";
 import { getAccountLinkingUrl } from "@/utils/account-linking";
 import { isGoogleProvider } from "@/utils/email/provider-types";
 import { redirectToSafeUrl } from "@/utils/redirect";
+import { SmarterMailConnect } from "@/app/(app)/accounts/SmarterMailConnect";
 
 export function AddAccount({
   helperText = "You will be billed for each account.",
@@ -77,6 +78,7 @@ export function AddAccount({
         </Button>
       </div>
 
+      <SmarterMailConnect />
       <MutedText>{helperText}</MutedText>
     </div>
   );

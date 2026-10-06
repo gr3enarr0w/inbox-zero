@@ -160,6 +160,12 @@ services:
             sleep 21600
           done
         ) &
+        (
+          while true; do
+            curl --fail --silent --show-error --max-time 60 'http://web:3000/api/cron/smartermail-sync' -H \"Authorization: Bearer $${CRON_SECRET}\" || echo \"[cron] Warning: SmarterMail sync request failed\"
+            sleep 60
+          done
+        ) &
         wait
         }
       "

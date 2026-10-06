@@ -67,7 +67,7 @@ export type ListToolbarProps = {
   /** Gmail labels or Outlook categories offered in the Search dropdown. */
   searchLabels?: { name: string }[];
   searchFolders?: { name: string }[];
-  searchVariant?: "gmail" | "outlook" | "common";
+  searchVariant?: "gmail" | "outlook" | "common" | "native";
   onToggleLayout: () => void;
   onTogglePreview: () => void;
   onToggleAssistant: () => void;
@@ -306,7 +306,7 @@ function MailSearchInput({
   inputRef?: RefObject<HTMLInputElement | null>;
   searchLabels?: { name: string }[];
   searchFolders?: { name: string }[];
-  searchVariant?: "gmail" | "outlook" | "common";
+  searchVariant?: "gmail" | "outlook" | "common" | "native";
 }) {
   const localRef = useRef<HTMLInputElement>(null);
   const inputRef = inputRefProp ?? localRef;
@@ -323,7 +323,11 @@ function MailSearchInput({
   const suggestions = useMailSearchSuggestions({
     draft,
     emailAccountId,
-    enabled: focused && !filtersOpen && !suggestionsDismissed,
+    enabled:
+      searchVariant !== "native" &&
+      focused &&
+      !filtersOpen &&
+      !suggestionsDismissed,
     recentSearches,
   });
   const suggestionsOpen = suggestions.length > 0;
@@ -354,24 +358,26 @@ function MailSearchInput({
           }}
           controls={
             <>
-              <PopoverTrigger asChild>
-                <button
-                  type="button"
-                  aria-label="Show search options"
-                  aria-expanded={filtersOpen}
-                  className={cn(
-                    "flex h-full w-7 shrink-0 items-center justify-center rounded-r-lg text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                    filtersOpen && "text-foreground",
-                  )}
-                >
-                  <ChevronDownIcon
+              {searchVariant !== "native" && (
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="Show search options"
+                    aria-expanded={filtersOpen}
                     className={cn(
-                      "size-3.5 transition-transform",
-                      filtersOpen && "rotate-180",
+                      "flex h-full w-7 shrink-0 items-center justify-center rounded-r-lg text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      filtersOpen && "text-foreground",
                     )}
-                  />
-                </button>
-              </PopoverTrigger>
+                  >
+                    <ChevronDownIcon
+                      className={cn(
+                        "size-3.5 transition-transform",
+                        filtersOpen && "rotate-180",
+                      )}
+                    />
+                  </button>
+                </PopoverTrigger>
+              )}
               {suggestionsOpen ? (
                 <MailSearchSuggestionList
                   activeIndex={highlightedIndex}
@@ -478,7 +484,7 @@ function MailSearchInput({
           }
         }}
       >
-        {filtersOpen ? (
+        {filtersOpen && searchVariant !== "native" ? (
           <AdvancedSearchForm
             filterDraft={filterDraft}
             searchFolders={searchFolders}

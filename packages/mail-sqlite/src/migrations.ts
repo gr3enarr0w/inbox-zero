@@ -5,6 +5,7 @@ import {
   migrateMembershipIndex,
 } from "./conversation-index";
 import { migrateMessageSearchIndex } from "./message-search-index";
+import { migrateAccountProviders } from "./account-provider-migration";
 
 export const MAILBOX_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -409,4 +410,5 @@ export async function migrateMailbox(
   await migrateMembershipIndex(tx);
   await migrateInboxUnreadExcludesArchive(tx);
   await migrateMessageSearchIndex(tx);
+  await migrateAccountProviders(tx);
 }

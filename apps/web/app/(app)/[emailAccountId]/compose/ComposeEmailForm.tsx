@@ -303,7 +303,9 @@ function ComposeEmailFormContent({
 }) {
   const isComposeWindow = layout === "window";
   const isInlineReply = Boolean(draftKeyMessageId && replyingToEmail?.threadId);
-  const canScheduleDelivery = isInlineReply || isComposeWindow;
+  const isSmarterMail = accountProvider === "smartermail";
+  const canScheduleDelivery =
+    !isSmarterMail && (isInlineReply || isComposeWindow);
   const isNewCompose = !replyingToEmail && !providerDraftMessageId;
   const { mutate } = useSWRConfig();
   const client = useOptionalMailClient() ?? getActiveMailClient();
@@ -673,6 +675,12 @@ function ComposeEmailFormContent({
 
   const addFiles = useCallback(
     async (files: File[], disposition: ComposeAttachment["disposition"]) => {
+      if (isSmarterMail) {
+        toastError({
+          description: "SmarterMail attachments are not available yet.",
+        });
+        return;
+      }
       if (disposition === "inline" && initialDraft.mode === "fallback") {
         toastError({
           description:
@@ -751,7 +759,7 @@ function ComposeEmailFormContent({
       }
       updateAttachments([...attachmentsRef.current, ...acceptedAttachments]);
     },
-    [initialDraft.mode, updateAttachments],
+    [initialDraft.mode, updateAttachments, isSmarterMail],
   );
 
   const removeAttachment = useCallback(
@@ -784,6 +792,13 @@ function ComposeEmailFormContent({
 
   const onSubmit: SubmitHandler<ComposeFormValues> = useCallback(
     async (data, event) => {
+      if (isSmarterMail) {
+        toastError({
+          description:
+            "SmarterMail sending is not available yet. You can save this message as a draft.",
+        });
+        return;
+      }
       const submitter = (event?.nativeEvent as SubmitEvent | undefined)
         ?.submitter;
       const markDoneAfterSend = submitter === sendAndMarkDoneButtonRef.current;
@@ -1071,6 +1086,7 @@ function ComposeEmailFormContent({
       stopProviderAutosave,
       resumeProviderAutosave,
       canScheduleDelivery,
+      isSmarterMail,
       initialDraft,
       isInlineReply,
       isNewCompose,
@@ -1097,6 +1113,10 @@ function ComposeEmailFormContent({
   );
 
   const reconnectContacts = async () => {
+    if (isSmarterMail) {
+      window.location.assign("/accounts");
+      return;
+    }
     setIsReconnectingContacts(true);
 
     try {
@@ -1261,7 +1281,8 @@ function ComposeEmailFormContent({
     send: (event) => {
       if (
         !isShortcutForForm(event, formRef.current, shortcutOwnerId) ||
-        isSubmitting
+        isSubmitting ||
+        isSmarterMail
       )
         return;
       formRef.current?.requestSubmit();
@@ -1536,11 +1557,20 @@ function ComposeEmailFormContent({
           <Tooltip
             shortcuts={onMarkDone ? ["send", "sendAndMarkDone"] : ["send"]}
           >
-            <Button disabled={isSubmitting} type="submit" variant="gradient">
+            <Button
+              disabled={isSubmitting || isSmarterMail}
+              type="submit"
+              variant="gradient"
+            >
               {isSubmitting && <ButtonLoader />}
               Send
             </Button>
           </Tooltip>
+          {isSmarterMail && (
+            <span className="text-xs text-muted-foreground">
+              Drafts supported. Sending unavailable.
+            </span>
+          )}
           <button
             aria-hidden
             hidden
@@ -1586,6 +1616,7 @@ function ComposeEmailFormContent({
           <Tooltip shortcuts={["attachFiles"]}>
             <Button
               aria-label="Attach files"
+              disabled={isSmarterMail}
               className="hover:bg-transparent"
               onClick={() => attachmentInputRef.current?.click()}
               size="icon"
@@ -1606,6 +1637,7 @@ function ComposeEmailFormContent({
           />
           <Button
             aria-label="Insert inline images"
+            disabled={isSmarterMail}
             className="hover:bg-transparent"
             onClick={() => inlineImageInputRef.current?.click()}
             size="icon"

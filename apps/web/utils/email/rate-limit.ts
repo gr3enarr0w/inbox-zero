@@ -1,4 +1,5 @@
 import "server-only";
+import { SmarterMailApiError } from "@/utils/smartermail/errors";
 import type { Logger } from "@/utils/logger";
 import {
   getProviderFromRateLimitApiErrorType,
@@ -295,6 +296,14 @@ export function getProviderRateLimitDelayMs({
     return getGoogleRateLimitDelayMs(error, attemptNumber);
   }
 
+  if (provider === "smartermail") {
+    return error instanceof SmarterMailApiError && error.status === 429
+      ? Math.min(
+          DEFAULT_RATE_LIMIT_DELAY_MS * 2 ** Math.max(0, attemptNumber - 1),
+          300_000,
+        )
+      : null;
+  }
   return getMicrosoftRateLimitDelayMs(error, attemptNumber);
 }
 

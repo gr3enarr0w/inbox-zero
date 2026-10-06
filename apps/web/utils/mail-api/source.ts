@@ -1,3 +1,6 @@
+import { LocalMailSyncPausedError } from "@/utils/email/local-mail-sync-budget";
+import { SmarterMailUnsupportedError } from "@/utils/smartermail/provider/error";
+import { scopedLocalSyncProvider } from "@/utils/smartermail/local-sync-provider";
 import { messageMatchesPredicate } from "@inboxzero/mail-core/query-semantics";
 import type { MailPredicate } from "@inboxzero/mail-core/queries";
 import type {
@@ -52,8 +55,10 @@ export function createEmailProviderMailboxSource(input: {
   provider: EmailProvider;
   accountId: string;
 }): MailboxSource {
-  const { provider, accountId } = input;
-  const maxPageSize = provider.name === "microsoft" ? 20 : 50;
+  const { accountId } = input;
+  const provider = scopedLocalSyncProvider(input.provider, accountId);
+  const maxPageSize =
+    provider.name === "microsoft" || provider.name === "smartermail" ? 20 : 50;
   return {
     async describe() {
       return {
@@ -70,7 +75,7 @@ export function createEmailProviderMailboxSource(input: {
       };
     },
     async discoverScopes() {
-      if (provider.name === "microsoft") {
+      if (provider.localMailSyncStrategy === "folder-delta") {
         const folders = await provider.getFolders();
         return {
           status: "ok",
@@ -183,7 +188,8 @@ export function createEmailProviderMailboxSource(input: {
         const page = await provider.getMailboxSyncPage({
           cursor: position.checkpoint || undefined,
           folderId:
-            provider.name === "microsoft" && position.streamId !== "primary"
+            provider.localMailSyncStrategy === "folder-delta" &&
+            position.streamId !== "primary"
               ? position.streamId
               : undefined,
           limit: pageSize,
@@ -296,6 +302,8 @@ export function createEmailProviderMailboxSource(input: {
           },
         };
       } catch (error) {
+        if (error instanceof SmarterMailUnsupportedError)
+          return { status: "ok", value: { status: "unsupported" } };
         if (!isMissingProviderResource(error)) return mapProviderError(error);
         return { status: "ok", value: { status: "not_found" } };
       }
@@ -419,7 +427,7 @@ async function catchUpCheckpoint(
     });
     if (page.cursor) return page.cursor;
   } catch (error) {
-    if (provider.name === "microsoft") throw error;
+    if (provider.localMailSyncStrategy === "folder-delta") throw error;
     // Fall back to the newest numeric Gmail history id we already fetched.
   }
   return encodedGmailCursorFromMessages(messages);
@@ -457,7 +465,8 @@ async function finalCatchUpFrom({
 }
 
 function scopedFolderId(provider: EmailProvider, scope: ScopeDescriptor) {
-  if (provider.name === "microsoft") return scope.folderId ?? scope.id;
+  if (provider.localMailSyncStrategy === "folder-delta")
+    return scope.folderId ?? scope.id;
   return scope.folderId ?? undefined;
 }
 
@@ -502,6 +511,13 @@ function isRejectedProviderRequest(error: unknown) {
 }
 
 function mapProviderError(error: unknown) {
+  if (error instanceof LocalMailSyncPausedError) {
+    return {
+      status: "paused" as const,
+      retryAfterMs: error.retryAfterMs,
+      reason: "throttled" as const,
+    };
+  }
   if (isProviderRateLimitModeError(error)) {
     return {
       status: "paused" as const,

@@ -3,7 +3,10 @@ import { Button } from "@/components/ui/button";
 import { useDisplayedEmail } from "@/hooks/useDisplayedEmail";
 import { Tooltip } from "@/components/Tooltip";
 import { useAccount } from "@/providers/EmailAccountProvider";
-import { isGoogleProvider } from "@/utils/email/provider-types";
+import {
+  isGoogleProvider,
+  isSmarterMailProvider,
+} from "@/utils/email/provider-types";
 
 export function ViewEmailButton({
   threadId,
@@ -19,7 +22,7 @@ export function ViewEmailButton({
   const { provider } = useAccount();
   const { showEmail } = useDisplayedEmail();
 
-  if (!isGoogleProvider(provider)) {
+  if (!isGoogleProvider(provider) && !isSmarterMailProvider(provider)) {
     return null;
   }
 
@@ -28,7 +31,13 @@ export function ViewEmailButton({
       <Button
         variant="outline"
         size={size || "icon"}
-        onClick={() => showEmail({ threadId, messageId })}
+        onClick={() =>
+          showEmail({
+            threadId,
+            messageId,
+            showReplyButton: isGoogleProvider(provider),
+          })
+        }
         className={className}
       >
         <MailIcon className="h-4 w-4" />

@@ -29,7 +29,7 @@ export async function recordEmailAccountProviderIssue({
   failedAccessToken,
 }: {
   emailAccountId: string;
-  provider: "google" | "microsoft";
+  provider: "google" | "microsoft" | "smartermail";
   error: unknown;
   logger: Logger;
   operation: string;
@@ -89,7 +89,7 @@ export function classifyEmailAccountProviderIssue({
   provider,
 }: {
   error: unknown;
-  provider: "google" | "microsoft";
+  provider: "google" | "microsoft" | "smartermail";
 }): ProviderIssue | null {
   const message = getErrorMessage(error);
 
@@ -128,7 +128,7 @@ async function claimProviderIssueCleanup({
   logger,
 }: {
   emailAccountId: string;
-  provider: "google" | "microsoft";
+  provider: "google" | "microsoft" | "smartermail";
   operation: string;
   reason: ProviderIssueReason;
   logger: Logger;

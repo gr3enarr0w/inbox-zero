@@ -77,6 +77,7 @@ export type MailSidebarProps = {
   labelSingular: string;
   backToAppHref: string;
   onCompose: () => void;
+  readOnlyLabels?: boolean;
   onCreateLabel: (name: string) => void;
   onEditMailboxItem: (edit: MailboxItemEdit) => Promise<boolean>;
   onDeleteMailboxItem: (item: MailboxItem) => Promise<boolean>;
@@ -173,6 +174,7 @@ export function MailSidebar({
   labelSingular,
   backToAppHref,
   onCompose,
+  readOnlyLabels = false,
   onCreateLabel,
   onEditMailboxItem,
   onDeleteMailboxItem,
@@ -449,6 +451,12 @@ export function MailSidebar({
                     setShowLabels(true);
                     setIsAddingLabel((open) => !open);
                   }}
+                  disabled={readOnlyLabels}
+                  title={
+                    readOnlyLabels
+                      ? "Create categories in your mail server settings."
+                      : undefined
+                  }
                   aria-expanded={isAddingLabel}
                   aria-label={`Create ${labelSingular}`}
                   className="rounded-md p-0.5 text-muted-foreground hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -473,6 +481,7 @@ export function MailSidebar({
                     labelSingular={labelSingular}
                     labelEditMode={labelEditMode}
                     labelColorOptions={labelColorOptions}
+                    readOnlyLabels={readOnlyLabels}
                     supportsLabelVisibility={supportsLabelVisibility}
                     onEditMailboxItem={onEditMailboxItem}
                     onDeleteMailboxItem={onDeleteMailboxItem}
@@ -510,6 +519,7 @@ export function MailSidebar({
                         labelSingular={labelSingular}
                         labelEditMode={labelEditMode}
                         labelColorOptions={labelColorOptions}
+                        readOnlyLabels={readOnlyLabels}
                         supportsLabelVisibility={supportsLabelVisibility}
                         onEditMailboxItem={onEditMailboxItem}
                         onDeleteMailboxItem={onDeleteMailboxItem}
@@ -568,6 +578,7 @@ function LabelBranch({
   | "labelEditMode"
   | "labelColorOptions"
   | "supportsLabelVisibility"
+  | "readOnlyLabels"
   | "onEditMailboxItem"
   | "onDeleteMailboxItem"
 > & { node: SidebarLabel; hasNestedLabels: boolean; collapsed: boolean }) {
@@ -597,6 +608,7 @@ function LabelBranch({
     <div>
       <MailboxItemContextMenu
         item={{ kind: "label", id: label.id, name: label.name }}
+        disabled={props.readOnlyLabels}
         typeName={props.labelSingular}
         editMode={props.labelEditMode}
         currentColor={label.color}
