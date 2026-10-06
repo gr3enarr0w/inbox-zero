@@ -81,4 +81,54 @@ describe("SmarterMail provider", () => {
     ).rejects.toThrow("does not currently support");
     expect(request).not.toHaveBeenCalled();
   });
+  it("hydrates conversation candidates once within the request budget and refuses incomplete strict history", async () => {
+    const { provider, request } = fixtureProvider();
+    let candidateCount = 20;
+    request.mockImplementation(async (operation, body) => {
+      if (operation === "search")
+        return {
+          results: Array.from({ length: candidateCount }, (_, index) => ({
+            uid: index + 1,
+            folder: "Inbox",
+          })),
+          totalCount: candidateCount,
+        };
+      if (operation === "message") {
+        const uid = Number(body?.uid);
+        const references =
+          uid === 1
+            ? ""
+            : uid === 4
+              ? "References: <m1@example.com> <m2@example.com> <m3@example.com>\r\n"
+              : "References: <m1@example.com>\r\n";
+        return {
+          messageData: {
+            date: "2026-01-01T00:00:00Z",
+            header: `${references}Message-ID: <m${uid}@example.com>`,
+          },
+        };
+      }
+      throw new Error("Unexpected operation");
+    });
+    const anchor = smarterMailMessageId("Inbox", 4);
+    expect(
+      (await provider.getThread(anchor, { complete: true })).messages,
+    ).toHaveLength(20);
+    expect(request.mock.calls).toHaveLength(21);
+    expect(
+      request.mock.calls.filter(([operation]) => operation === "message"),
+    ).toHaveLength(20);
+    request.mockClear();
+    candidateCount = 25;
+    await expect(
+      provider.getThread(anchor, { complete: true }),
+    ).rejects.toThrow("complete conversations beyond");
+    expect(request.mock.calls).toHaveLength(2);
+    request.mockClear();
+    candidateCount = 1;
+    await expect(
+      provider.getThread(anchor, { complete: true }),
+    ).rejects.toThrow("unresolved referenced");
+    expect((await provider.getThread(anchor)).messages).toHaveLength(2);
+  });
 });

@@ -2,8 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { isTransactionalEmailConfigured } from "@inboxzero/transactional-email/src/delivery";
 import { updateEmailOtpSetting } from "@/utils/auth/email-otp-setting";
 import prisma from "@/utils/__mocks__/prisma";
+import { Prisma } from "@/generated/prisma/client";
 
 vi.mock("@/utils/prisma");
+vi.mock("@/utils/oauth/login-providers", () => ({
+  getEnabledLoginProviders: () => new Set(["google", "microsoft"]),
+}));
 vi.mock("@inboxzero/transactional-email/src/delivery", () => ({
   isTransactionalEmailConfigured: vi.fn(() => true),
 }));
@@ -16,6 +20,7 @@ describe("email code access setting", () => {
     prisma.user.findUniqueOrThrow.mockResolvedValue({
       email: "owner@example.com",
     } as never);
+    prisma.account.count.mockResolvedValue(1);
   });
 
   it.each([
@@ -59,7 +64,11 @@ describe("email code access setting", () => {
       enabled: false,
     });
     expect(prisma.user.update).toHaveBeenCalledWith({
-      where: { id: "owner" },
+      where: {
+        id: "owner",
+        email: "owner@example.com",
+        accounts: { some: { provider: { in: ["google", "microsoft"] } } },
+      },
       data: { emailOtpEnabled: false, emailOtpVersion: { increment: 1 } },
     });
     expect(prisma.session.deleteMany).toHaveBeenCalledWith({
@@ -69,6 +78,7 @@ describe("email code access setting", () => {
       where: { identifier: "sign-in-otp-owner@example.com" },
     });
     expect(prisma.$transaction).toHaveBeenCalledWith([
+      prisma.$queryRaw.mock.results[0].value,
       prisma.user.update.mock.results[0].value,
       prisma.verificationToken.deleteMany.mock.results[0].value,
       prisma.session.deleteMany.mock.results[0].value,
@@ -85,7 +95,7 @@ describe("email code access setting", () => {
       enabled: true,
     });
     expect(prisma.user.update).toHaveBeenCalledWith({
-      where: { id: "owner" },
+      where: { id: "owner", email: " Owner@Example.com " },
       data: {
         emailOtpEnabled: true,
         emailOtpVersion: { increment: 1 },
@@ -114,5 +124,41 @@ describe("email code access setting", () => {
         enabled: false,
       }),
     ).resolves.toEqual({ enabled: false });
+  });
+  it("keeps OTP enabled when only SmarterMail remains despite a retained provider session", async () => {
+    prisma.account.count.mockResolvedValue(0);
+    await expect(
+      updateEmailOtpSetting({
+        userId: "owner",
+        sessionId: "old-provider-session",
+        enabled: false,
+      }),
+    ).rejects.toThrow("Connect a sign-in provider");
+    expect(prisma.user.update).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+  it("rechecks login access under the same user lock as mailbox deletion", async () => {
+    prisma.$transaction.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError("Login account changed", {
+        code: "P2025",
+        clientVersion: "test",
+      }),
+    );
+    await expect(
+      updateEmailOtpSetting({
+        userId: "owner",
+        sessionId: "session",
+        enabled: false,
+      }),
+    ).rejects.toThrow("Connect a sign-in provider");
+    expect(prisma.$queryRaw).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.stringContaining("pg_advisory_xact_lock(539114481"),
+      ]),
+      "owner",
+    );
+    expect(prisma.$transaction).toHaveBeenCalledWith(
+      expect.arrayContaining([prisma.$queryRaw.mock.results[0].value]),
+    );
   });
 });

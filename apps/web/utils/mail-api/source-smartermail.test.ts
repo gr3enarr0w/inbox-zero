@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { SmarterMailUnsupportedError } from "@/utils/smartermail/provider/error";
 import { createEmailProviderMailboxSource } from "./source";
 import type { EmailProvider } from "@/utils/email/types";
 
@@ -54,5 +55,29 @@ describe("SmarterMail mailbox source scope", () => {
       folderId: "Archive",
       limit: 20,
     });
+  });
+  it("does not repeatedly retry an unsupported complete conversation lookup", async () => {
+    const source = createEmailProviderMailboxSource({
+      accountId: "account",
+      provider: {
+        name: "smartermail",
+        localMailSyncStrategy: "folder-delta",
+        getThread: vi
+          .fn()
+          .mockRejectedValue(
+            new SmarterMailUnsupportedError("complete conversation limit"),
+          ),
+      } as unknown as EmailProvider,
+    });
+    const result = await source.readConversationMembership({
+      conversation: { accountId: "account", conversationId: "conversation" },
+      session: { accountId: "account", generation: "generation" },
+      resolutionId: "resolution",
+      page: null,
+      pageSize: 20,
+      requestId: "request",
+      signal: new AbortController().signal,
+    });
+    expect(result).toEqual({ status: "ok", value: { status: "unsupported" } });
   });
 });

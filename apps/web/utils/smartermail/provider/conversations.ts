@@ -1,3 +1,9 @@
+import { listingSchema } from "@/utils/smartermail/provider/schemas";
+import { SmarterMailUnsupportedError } from "@/utils/smartermail/provider/error";
+import {
+  normalizeSmarterMailMessage,
+  smarterMailMessageId,
+} from "@/utils/smartermail/message";
 import type { EmailProvider, EmailThread } from "@/utils/email/types";
 import type { ParsedMessage } from "@/utils/types";
 import { SmarterMailSendersProvider } from "@/utils/smartermail/provider/senders";
@@ -8,7 +14,7 @@ export class SmarterMailConversationsProvider extends SmarterMailSendersProvider
     const result = await this.searchMessages({
       query: "",
       headerReference: reference,
-      maxResults: 100,
+      maxResults: 25,
       includeSpamTrash: true,
     });
     const match = result.messages.find(
@@ -28,33 +34,62 @@ export class SmarterMailConversationsProvider extends SmarterMailSendersProvider
     const anchor = await this.getMessage(threadId);
     const messages = new Map<string, ParsedMessage>([[anchor.id, anchor]]);
     const references = headerReferences(anchor);
-    const ancestorIds = references.filter(
-      (reference) => reference !== anchor.headers["message-id"],
-    );
-    if (options?.complete && ancestorIds.length > 20)
-      throw new Error(
-        "SmarterMail conversation exceeds its safe ancestor limit",
-      );
-    for (const reference of ancestorIds.slice(-20)) {
-      options?.signal?.throwIfAborted();
-      const ancestor = await this.getMessageByRfc822MessageId(reference);
-      if (ancestor) messages.set(ancestor.id, ancestor);
-    }
     const rootReference = references[0];
     if (rootReference) {
-      const result = await this.searchMessages({
-        query: "",
-        headerReference: rootReference,
-        maxResults: 100,
-        includeSpamTrash: true,
-      });
-      if (options?.complete && result.nextPageToken)
+      const result = listingSchema.parse(
+        await this.client.request("search", {
+          query: rootReference,
+          fieldsToSearch: 64,
+          folder: "",
+          skip: 0,
+          take: 25,
+          includeSubFolders: true,
+        }),
+      );
+      if (result.results.length > 25)
         throw new Error(
-          "SmarterMail conversation exceeds its safe result limit",
+          "SmarterMail header search exceeded its requested page size",
         );
-      for (const candidate of result.messages) {
+      const seenIds = new Set([anchor.id]);
+      if (
+        options?.complete &&
+        (result.results.length >= 25 ||
+          (result.totalCount ?? 0) > result.results.length)
+      )
+        throw new SmarterMailUnsupportedError(
+          "complete conversations beyond the bounded history window",
+        );
+      for (const row of result.results) {
+        options?.signal?.throwIfAborted();
+        if (typeof row.folder !== "string")
+          throw new Error(
+            "SmarterMail header search result has no folder reference",
+          );
+        const id = smarterMailMessageId(row.folder, row.uid);
+        if (seenIds.has(id)) continue;
+        seenIds.add(id);
+        const candidate = normalizeSmarterMailMessage(
+          await this.client.request("message", {
+            folder: row.folder,
+            uid: row.uid,
+          }),
+          row.folder,
+          row.uid,
+          row,
+        );
         if (headerReferences(candidate).includes(rootReference))
-          messages.set(candidate.id, candidate);
+          messages.set(id, candidate);
+      }
+      if (options?.complete) {
+        const foundIds = new Set(
+          [...messages.values()].map(
+            (message) => message.headers["message-id"],
+          ),
+        );
+        if (references.some((reference) => !foundIds.has(reference)))
+          throw new SmarterMailUnsupportedError(
+            "complete conversations with unresolved referenced messages",
+          );
       }
     }
     const ordered = [...messages.values()]

@@ -33,3 +33,10 @@ export async function getMailboxDeletionLoginGuard(
   // Recheck inside the existing locked transaction so simultaneous deletions cannot remove every login.
   return { user };
 }
+
+export function userLoginLock(userId: string) {
+  return prisma.$queryRaw`
+    SELECT true AS locked
+    FROM (SELECT pg_advisory_xact_lock(539114481, hashtext(${userId}))) lock
+  `;
+}

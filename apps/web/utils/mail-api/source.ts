@@ -1,4 +1,5 @@
 import { LocalMailSyncPausedError } from "@/utils/email/local-mail-sync-budget";
+import { SmarterMailUnsupportedError } from "@/utils/smartermail/provider/error";
 import { scopedLocalSyncProvider } from "@/utils/smartermail/local-sync-provider";
 import { messageMatchesPredicate } from "@inboxzero/mail-core/query-semantics";
 import type { MailPredicate } from "@inboxzero/mail-core/queries";
@@ -301,6 +302,8 @@ export function createEmailProviderMailboxSource(input: {
           },
         };
       } catch (error) {
+        if (error instanceof SmarterMailUnsupportedError)
+          return { status: "ok", value: { status: "unsupported" } };
         if (!isMissingProviderResource(error)) return mapProviderError(error);
         return { status: "ok", value: { status: "not_found" } };
       }

@@ -29,7 +29,7 @@ Also create the categories selected by your custom rules. Enable automatic proce
 
 The native provider supports inbox and folder reading, body/header normalization, structured sender/date/read/starred/category searches, existing category assignment, read/star flags, folder moves, archive/trash, personal contact search, and draft creation/update/deletion. Draft references use the server's stable MID and resolve the current UID before updates or deletion.
 
-Conversation lookup reconstructs related history from RFC Message-ID, In-Reply-To, and References headers, with a maximum of 20 ancestor lookups and 100 matching header-search results. It rejects unrelated header matches. Mailbox lists still represent individual messages; missing or invalid threading headers limit the history available. Requests explicitly requiring a complete conversation fail if the candidate limit is reached.
+Conversation lookup reconstructs related history from RFC Message-ID, In-Reply-To, and References headers using one search of up to 25 candidates. It rejects unrelated header matches and hydrates each candidate at most once. Mailbox lists still represent individual messages; missing or invalid threading headers limit the history available. Requests explicitly requiring a complete conversation report unsupported when the window is full or referenced messages are missing. Thread actions modify only the selected message; email headers cannot expand the scope of an action.
 
 The following capabilities return explicit unsupported-operation errors:
 
