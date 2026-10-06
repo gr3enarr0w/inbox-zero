@@ -26,13 +26,16 @@ export async function fetchSmarterMailCalendarEvents(
     throw new SafeError(
       "SmarterMail calendar queries require a valid window of at most 93 days",
     );
-  if (calendarIds.length > 20)
+  if (calendarIds.length > 50)
     throw new SafeError("Too many SmarterMail calendars");
   const sources = await getSmarterMailCalendarSources(client, ownerEmail);
   const allowed = new Set(
     sources.map((source) => smarterMailCalendarId(source.owner, source.id)),
   );
-  const events: Array<z.infer<typeof smarterMailEventSchema>> = [];
+  const events: Array<{
+    event: z.infer<typeof smarterMailEventSchema>;
+    startTime: number;
+  }> = [];
   for (const calendarId of new Set(calendarIds)) {
     if (!allowed.has(calendarId))
       throw new SafeError("SmarterMail calendar unavailable");
@@ -51,13 +54,16 @@ export async function fetchSmarterMailCalendarEvents(
         throw new SafeError("SmarterMail event scope mismatch");
       if (event.status === 2 || event.isTask) continue;
       const normalized = normalizeSmarterMailCalendarEvent(event);
-      if (normalized.endTime > timeMin && normalized.startTime < timeMax)
-        events.push(event);
+      if (normalized.endTime > timeMin && normalized.startTime < timeMax) {
+        events.push({ event, startTime: normalized.startTime.getTime() });
+        if (events.length > 5000)
+          throw new SafeError(
+            "SmarterMail calendar query exceeds 5000 events; use a smaller date window",
+          );
+      }
     }
   }
-  return events.sort(
-    (a, b) =>
-      normalizeSmarterMailCalendarEvent(a).startTime.getTime() -
-      normalizeSmarterMailCalendarEvent(b).startTime.getTime(),
-  );
+  return events
+    .sort((a, b) => a.startTime - b.startTime)
+    .map(({ event }) => event);
 }

@@ -14,7 +14,7 @@ This connects mailboxes to an authenticated Inbox Zero user; it does not enable 
 
 After connecting a mailbox, open **Calendars** and choose **Add SmarterMail Calendar**. The connection reuses that mailbox's authenticated session; no separate OAuth registration or saved calendar password is required.
 
-Personal calendars support event reading and availability checks. Shared calendars, subscribed calendars, tasks, and domain resources are excluded. Uncancelled events are conservatively treated as busy, so events marked free may reduce suggested availability. Queries are bounded to 93 days and 20 calendars; attendee detail searches require smaller windows when more than 25 events match.
+Personal calendars support event reading and availability checks. Shared calendars, subscribed calendars, tasks, and domain resources are excluded. Uncancelled events are conservatively treated as busy, so events marked free may reduce suggested availability. Queries are bounded to 93 days, 50 calendars, and 5,000 matching events in total; attendee detail searches require smaller windows when more than 25 events match.
 
 Creating, editing, deleting, and responding to calendar invitations are not supported. SmarterMail calendars cannot be selected as booking destinations. Google and Microsoft calendar connections can still provide a booking destination.
 

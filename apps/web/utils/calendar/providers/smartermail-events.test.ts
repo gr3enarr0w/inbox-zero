@@ -6,6 +6,7 @@ import { SmarterMailCalendarEventProvider } from "@/utils/calendar/providers/sma
 import { fetchSmarterMailCalendarEvents } from "@/utils/calendar/providers/smartermail-event-read";
 import { smarterMailCalendarId } from "@/utils/calendar/providers/smartermail-calendar-id";
 import { createScopedLogger } from "@/utils/logger";
+import * as normalization from "@/utils/calendar/providers/smartermail-event-normalization";
 vi.mock("server-only", () => ({}));
 vi.mock("@/utils/prisma");
 vi.mock("@/utils/smartermail/account", () => ({
@@ -57,6 +58,73 @@ beforeEach(() => {
   prisma.emailAccount.findUnique.mockResolvedValue({ email: owner } as never);
 });
 describe("native SmarterMail calendar reads", () => {
+  it("supports all 50 discovered personal calendars with sequential reads", async () => {
+    const sources = Array.from({ length: 50 }, (_, index) => ({
+      ...source,
+      id: `calendar-${index}`,
+    }));
+    request
+      .mockResolvedValueOnce({ calendars: sources })
+      .mockResolvedValue({ events: [] });
+    const events = await fetchSmarterMailCalendarEvents(
+      client,
+      sources.map((source) => smarterMailCalendarId(owner, source.id)),
+      start,
+      end,
+      owner,
+    );
+    expect(events).toEqual([]);
+    expect(request).toHaveBeenCalledTimes(51);
+  });
+
+  it("sorts events while normalizing each one only once", async () => {
+    const normalize = vi.spyOn(
+      normalization,
+      "normalizeSmarterMailCalendarEvent",
+    );
+    const early = {
+      ...event,
+      id: 2,
+      uid: "early",
+      startWithTZ: { ...event.startWithTZ, date_local: "2026-07-08T08:00:00" },
+    };
+    request
+      .mockResolvedValueOnce({ calendars: [source] })
+      .mockResolvedValueOnce({ events: [event, early] });
+    const events = await fetchSmarterMailCalendarEvents(
+      client,
+      [calendarId],
+      start,
+      end,
+      owner,
+    );
+    expect(events.map((event) => event.uid)).toEqual(["early", "fixture"]);
+    expect(normalize).toHaveBeenCalledTimes(2);
+    normalize.mockRestore();
+  });
+
+  it("rejects an oversized combined event window instead of returning partial availability", async () => {
+    request
+      .mockResolvedValueOnce({
+        calendars: [source, { ...source, id: "second" }],
+      })
+      .mockResolvedValueOnce({
+        events: Array.from({ length: 5000 }, (_, index) => ({
+          ...event,
+          id: index + 1,
+        })),
+      })
+      .mockResolvedValueOnce({ events: [{ ...event, calId: "second" }] });
+    await expect(
+      fetchSmarterMailCalendarEvents(
+        client,
+        [calendarId, smarterMailCalendarId(owner, "second")],
+        start,
+        end,
+        owner,
+      ),
+    ).rejects.toThrow("exceeds 5000");
+  });
   it("uses enabled account-scoped calendars and filters cancelled occurrences", async () => {
     request
       .mockResolvedValueOnce({ calendars: [source] })
@@ -113,6 +181,15 @@ describe("native SmarterMail calendar reads", () => {
     ).rejects.toThrow("scope mismatch");
   });
   it("rejects invalid limits and unsupported mutations before network activity", async () => {
+    await expect(
+      fetchSmarterMailCalendarEvents(
+        client,
+        new Array<string>(51).fill(calendarId),
+        start,
+        end,
+        owner,
+      ),
+    ).rejects.toThrow("Too many SmarterMail calendars");
     await expect(provider.fetchEvents({ maxResults: 26 })).rejects.toThrow(
       "25",
     );
