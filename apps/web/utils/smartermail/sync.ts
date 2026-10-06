@@ -108,20 +108,31 @@ export async function syncSmarterMailAccount(
         skipDuplicates: true,
       });
       cursor = page.nextPageToken ? `scan:${page.nextPageToken}` : "process";
-      if (cursor !== "process") {
-        await releaseLease(emailAccountId, leaseToken, {
-          cursor,
-          failures: 0,
-          nextRunAt: new Date(Date.now() + 60_000),
-        });
-        return { processed: 0, reviewRequired: 0, hasMore: true };
-      }
     }
     const queued = await prisma.smarterMailSyncMessage.findMany({
       where: { emailAccountId, status: "queued" },
       orderBy: [{ createdAt: "asc" }, { messageKey: "asc" }],
       take: PAGE_SIZE,
     });
+    const scanOffset = cursor?.startsWith("scan:")
+      ? Number(cursor.slice(5))
+      : null;
+    const recoveryCursor =
+      scanOffset === null
+        ? "process"
+        : `scan:${Math.max(0, scanOffset - queued.length)}`;
+    // Replaying a rewound scan is safe; losing a checkpoint after moves must not skip mail.
+    const checkpoint = await prisma.smarterMailSyncState.updateMany({
+      where: {
+        emailAccountId,
+        leaseToken,
+        enabled: true,
+        leaseUntil: { gt: new Date() },
+      },
+      data: { cursor: recoveryCursor },
+    });
+    if (!checkpoint.count) return { skipped: true };
+    let departures = 0;
     let processed = 0;
     let reviewRequired = 0;
     let budgetExceeded = false;
@@ -192,9 +203,22 @@ export async function syncSmarterMailAccount(
       );
       if (result === "completed") processed++;
       if (result === "review_required") reviewRequired++;
+      const { folder } = parseSmarterMailMessageId(pending.messageId);
+      if (
+        !(await provider.hasMessagesInFolder(folder, [pending.messageId]))
+          .length
+      )
+        departures++;
     }
+    const nextCursor = budgetExceeded
+      ? recoveryCursor
+      : scanOffset === null
+        ? queued.length === PAGE_SIZE
+          ? "process"
+          : null
+        : `scan:${Math.max(0, scanOffset - departures)}`;
     await releaseLease(emailAccountId, leaseToken, {
-      cursor: budgetExceeded || queued.length === PAGE_SIZE ? "process" : null,
+      cursor: nextCursor,
       failures: 0,
       lastSyncedAt: new Date(),
       nextRunAt: new Date(Date.now() + 60_000),
@@ -202,7 +226,7 @@ export async function syncSmarterMailAccount(
     return {
       processed,
       reviewRequired,
-      hasMore: budgetExceeded || queued.length === PAGE_SIZE,
+      hasMore: nextCursor !== null,
     };
   } catch {
     const failures = state.failures + 1;

@@ -3,6 +3,7 @@ import type { ParsedMessage } from "@/utils/types";
 
 const messageSchema = z.object({
   uid: z.number().int().positive().optional(),
+  folder: z.string().optional(),
   subject: z.string().optional(),
   from: z
     .union([
@@ -64,6 +65,11 @@ export function normalizeSmarterMailMessage(
 ): ParsedMessage {
   const wrapper = z.object({ messageData: messageSchema }).parse(payload);
   const detail = wrapper.messageData;
+  if (
+    (detail.uid !== undefined && detail.uid !== uid) ||
+    (detail.folder !== undefined && detail.folder !== folder)
+  )
+    throw new Error("SmarterMail message identity mismatch");
   const metadata = messageSchema.parse(summary ?? {});
   const data = { ...metadata, ...detail };
   const rawHeaders = parseHeaders(data.header ?? "");
@@ -81,7 +87,7 @@ export function normalizeSmarterMailMessage(
     ...(data.categories ?? []).map(smarterMailCategoryId),
   ];
   if (role) labelIds.push(role);
-  if (data.isSeen === false) labelIds.push("UNREAD");
+  if (data.isSeen !== true) labelIds.push("UNREAD");
   if (data.isFlagged) labelIds.push("STARRED");
   return {
     id,

@@ -39,8 +39,13 @@ describe("SmarterMail conversation history", () => {
     vi.spyOn(client, "request").mockImplementation(async (operation, body) => {
       if (operation === "message")
         return { messageData: details[Number(body?.uid)] };
-      if (operation === "search")
-        return { results: [1, 2, 3].map((uid) => ({ uid, folder: "Inbox" })) };
+      if (operation === "folders")
+        return { folderList: [{ path: "Inbox" }, { path: "Sent Items" }] };
+      if (operation === "search") {
+        if (!body?.folder) throw new Error("Server rejects empty folder");
+        const uids = body.folder === "Sent Items" ? [1] : [2, 3];
+        return { results: uids.map((uid) => ({ uid, folder: body.folder })) };
+      }
       throw new Error("Unexpected operation");
     });
     const thread = await provider.getThread(smarterMailMessageId("Inbox", 2));
@@ -51,6 +56,15 @@ describe("SmarterMail conversation history", () => {
     expect(
       await provider.getMessageByRfc822MessageId("<missing@example.com>"),
     ).toBeNull();
+    vi.spyOn(provider, "searchMessages").mockResolvedValue({
+      messages: thread.messages,
+      nextPageToken: "remaining-folder-page",
+    });
+    await expect(
+      provider.getThread(smarterMailMessageId("Inbox", 2), {
+        complete: true,
+      }),
+    ).rejects.toThrow("bounded history window");
   });
   it("keeps all thread mutations scoped to the selected message despite forged References", async () => {
     const client = new SmarterMailClient({
@@ -75,10 +89,13 @@ describe("SmarterMail conversation history", () => {
           };
         if (operation === "search")
           return {
-            results: [
-              { uid: 1, folder: "Inbox" },
-              { uid: 2, folder: "Inbox" },
-            ],
+            results:
+              body?.folder === "Inbox"
+                ? [
+                    { uid: 1, folder: "Inbox" },
+                    { uid: 2, folder: "Inbox" },
+                  ]
+                : [],
           };
         if (operation === "message")
           return {

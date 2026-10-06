@@ -552,7 +552,14 @@ const gmailSearchInboxTool = ({
   tool({
     description:
       "Search inbox messages and return concise message metadata. Returns at most 20 messages per call. If hasMore=true, more matches remain; for bulk or all-matching requests, keep calling searchInbox with nextPageToken until hasMore=false before reporting completion. totalReturned is only the number of messages returned by this call, so do not present it or a single search page as an exact mailbox, folder, or label count. If the tool returns an error or provider search feedback instead of messages, treat the lookup as inconclusive rather than evidence that the email is absent.",
-    inputSchema: gmailSearchInboxInputSchema,
+    inputSchema:
+      provider === "smartermail"
+        ? gmailSearchInboxInputSchema.extend({
+            query: gmailSearchInboxInputSchema.shape.query.describe(
+              "SmarterMail search text, optionally combined with in:inbox/sent/drafts/archive/spam/trash, from:, label:, is:read/unread/starred, has:attachment, after:YYYY/MM/DD, before:YYYY/MM/DD, newer_than:Nd/Nm/Ny, or older_than:Nd/Nm/Ny. Use plain text for subjects or recipients. Exclusions, OR, and other operators are unsupported.",
+            ),
+          })
+        : gmailSearchInboxInputSchema,
     execute: async (input) => {
       trackToolCall({ tool: "search_inbox", email, logger });
 

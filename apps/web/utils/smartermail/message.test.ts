@@ -92,6 +92,30 @@ describe("SmarterMail message identity", () => {
       "message-id": "<fixture@example.com>",
     });
   });
+  it.each([
+    undefined,
+    true,
+  ])("honors read metadata when detail omits default flags", (isSeen) => {
+    const message = normalizeSmarterMailMessage(
+      { messageData: { date: "2026-01-02T12:00:00Z" } },
+      "Inbox",
+      8,
+      { isSeen },
+    );
+    expect(message.labelIds?.includes("UNREAD")).toBe(isSeen !== true);
+  });
+  it.each([
+    { uid: 9, folder: "Inbox" },
+    { uid: 8, folder: "Archive" },
+  ])("rejects a detail response for another message or folder", (identity) => {
+    expect(() =>
+      normalizeSmarterMailMessage(
+        { messageData: { ...identity, date: "2026-01-02T12:00:00Z" } },
+        "Inbox",
+        8,
+      ),
+    ).toThrow("message identity mismatch");
+  });
   it("rejects incomplete or corrupt messages rather than classifying empty content", () => {
     expect(() =>
       normalizeSmarterMailMessage({ results: [] }, "Inbox", 1),

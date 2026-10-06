@@ -1,9 +1,4 @@
-import { listingSchema } from "@/utils/smartermail/provider/schemas";
 import { SmarterMailUnsupportedError } from "@/utils/smartermail/provider/error";
-import {
-  normalizeSmarterMailMessage,
-  smarterMailMessageId,
-} from "@/utils/smartermail/message";
 import type { EmailProvider, EmailThread } from "@/utils/email/types";
 import type { ParsedMessage } from "@/utils/types";
 import { SmarterMailSendersProvider } from "@/utils/smartermail/provider/senders";
@@ -36,49 +31,20 @@ export class SmarterMailConversationsProvider extends SmarterMailSendersProvider
     const references = headerReferences(anchor);
     const rootReference = references[0];
     if (rootReference) {
-      const result = listingSchema.parse(
-        await this.client.request("search", {
-          query: rootReference,
-          fieldsToSearch: 64,
-          folder: "",
-          skip: 0,
-          take: 25,
-          includeSubFolders: true,
-        }),
-      );
-      if (result.results.length > 25)
-        throw new Error(
-          "SmarterMail header search exceeded its requested page size",
-        );
-      const seenIds = new Set([anchor.id]);
-      if (
-        options?.complete &&
-        (result.results.length >= 25 ||
-          (result.totalCount ?? 0) > result.results.length)
-      )
+      const result = await this.searchMessages({
+        query: "",
+        headerReference: rootReference,
+        maxResults: 25,
+        includeSpamTrash: true,
+      });
+      options?.signal?.throwIfAborted();
+      if (options?.complete && result.nextPageToken)
         throw new SmarterMailUnsupportedError(
           "complete conversations beyond the bounded history window",
         );
-      for (const row of result.results) {
-        options?.signal?.throwIfAborted();
-        if (typeof row.folder !== "string")
-          throw new Error(
-            "SmarterMail header search result has no folder reference",
-          );
-        const id = smarterMailMessageId(row.folder, row.uid);
-        if (seenIds.has(id)) continue;
-        seenIds.add(id);
-        const candidate = normalizeSmarterMailMessage(
-          await this.client.request("message", {
-            folder: row.folder,
-            uid: row.uid,
-          }),
-          row.folder,
-          row.uid,
-          row,
-        );
+      for (const candidate of result.messages) {
         if (headerReferences(candidate).includes(rootReference))
-          messages.set(id, candidate);
+          messages.set(candidate.id, candidate);
       }
       if (options?.complete) {
         const foundIds = new Set(

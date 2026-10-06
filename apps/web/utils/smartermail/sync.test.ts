@@ -135,22 +135,31 @@ describe("SmarterMail polling", () => {
       }),
     );
   });
-  it("finishes discovery before any archive action changes paging offsets", async () => {
+  it("processes queued mail during discovery and rebases offsets after archive", async () => {
+    vi.mocked(createEmailProvider).mockResolvedValue({
+      getMessagesWithPagination: list,
+      getMessage: vi.fn().mockResolvedValue(message),
+      hasMessagesInFolder: vi
+        .fn()
+        .mockResolvedValueOnce([message.id])
+        .mockResolvedValueOnce([]),
+    } as never);
     await syncSmarterMailAccount("account", logger);
-    expect(runRules).not.toHaveBeenCalled();
+    expect(runRules).toHaveBeenCalledOnce();
     expect(prisma.smarterMailSyncState.updateMany).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ cursor: "scan:25" }),
+        data: expect.objectContaining({ cursor: "scan:24" }),
       }),
     );
     prisma.smarterMailSyncState.findUniqueOrThrow.mockResolvedValue({
-      cursor: "scan:25",
+      cursor: "scan:24",
       failures: 0,
     } as never);
     list.mockResolvedValueOnce({ messages: [] });
+    prisma.smarterMailSyncMessage.findMany.mockResolvedValueOnce([]);
     await syncSmarterMailAccount("account", logger);
     expect(list).toHaveBeenLastCalledWith(
-      expect.objectContaining({ pageToken: "25" }),
+      expect.objectContaining({ pageToken: "24" }),
     );
     expect(runRules).toHaveBeenCalledOnce();
   });
@@ -223,7 +232,7 @@ describe("SmarterMail polling", () => {
     expect(runRules).not.toHaveBeenCalled();
     expect(prisma.smarterMailSyncMessage.update).not.toHaveBeenCalled();
   });
-  it("traverses a large inbox before archiving and discovers arrivals in the next cycle", async () => {
+  it("traverses a large inbox while archiving and discovers arrivals without duplicate actions", async () => {
     const makeMessage = (uid: number) => ({
       ...message,
       id: smarterMailMessageId("Inbox", uid),
@@ -314,6 +323,38 @@ describe("SmarterMail polling", () => {
       ).size,
     ).toBe(56);
     expect(inbox).toEqual([]);
+  });
+  it("persists a conservative rewind before actions so a lost completion cannot skip mail", async () => {
+    vi.mocked(createEmailProvider).mockResolvedValue({
+      getMessagesWithPagination: list,
+      getMessage: vi.fn().mockResolvedValue(message),
+      hasMessagesInFolder: vi
+        .fn()
+        .mockResolvedValueOnce([message.id])
+        .mockRejectedValueOnce(new Error("worker lost after archive")),
+    } as never);
+    await expect(syncSmarterMailAccount("account", logger)).rejects.toThrow(
+      "retry schedule",
+    );
+    expect(runRules).toHaveBeenCalledOnce();
+    const rewind = prisma.smarterMailSyncState.updateMany.mock.calls.findIndex(
+      ([args]) => args.data.cursor === "scan:24",
+    );
+    expect(rewind).toBeGreaterThan(-1);
+    expect(
+      prisma.smarterMailSyncState.updateMany.mock.invocationCallOrder[rewind],
+    ).toBeLessThan(vi.mocked(runRules).mock.invocationCallOrder[0]);
+    expect(
+      prisma.smarterMailSyncState.updateMany.mock.calls[rewind][0].where,
+    ).toMatchObject({
+      leaseToken: expect.any(String),
+      leaseUntil: { gt: expect.any(Date) },
+    });
+    expect(prisma.smarterMailSyncState.updateMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.not.objectContaining({ cursor: expect.anything() }),
+      }),
+    );
   });
   it.each([
     "malformed",
