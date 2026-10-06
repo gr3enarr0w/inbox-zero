@@ -26,15 +26,15 @@ export async function hydrateSmarterMailCalendarEvents(
           eventId: String(event.id),
         }),
       ).details;
-      if (
-        (detail.id !== 0 && detail.id !== event.id) ||
-        detail.uid !== event.uid ||
-        detail.calendarOwner !== event.owner ||
-        detail.calendarId !== event.calId
-      )
-        throw new SafeError("SmarterMail event detail scope mismatch");
       details.set(key, detail);
     }
+    if (
+      (detail.id !== 0 && detail.id !== event.id) ||
+      detail.uid !== event.uid ||
+      detail.calendarOwner !== event.owner ||
+      detail.calendarId !== event.calId
+    )
+      throw new SafeError("SmarterMail event detail scope mismatch");
     result.push(normalizeSmarterMailCalendarEvent(event, detail));
   }
   return result;

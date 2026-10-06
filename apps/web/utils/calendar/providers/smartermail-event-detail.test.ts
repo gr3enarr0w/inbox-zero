@@ -28,6 +28,22 @@ const detail = {
   attendees: [{ email: "attendee@example.com" }],
 };
 describe("SmarterMail detail identity", () => {
+  it("checks stable UID when reusing cached details for another occurrence", async () => {
+    const client = new SmarterMailClient({
+      baseUrl: "https://mail.example.com",
+      tokens: { accessToken: "fixture", refreshToken: "fixture" },
+    });
+    const request = vi
+      .spyOn(client, "request")
+      .mockResolvedValue({ details: detail });
+    await expect(
+      hydrateSmarterMailCalendarEvents(client, [
+        event,
+        { ...event, uid: "different" },
+      ]),
+    ).rejects.toThrow("scope mismatch");
+    expect(request).toHaveBeenCalledTimes(1);
+  });
   it("accepts a zero read-detail ID only with matching stable UID and scope", async () => {
     const client = new SmarterMailClient({
       baseUrl: "https://mail.example.com",
