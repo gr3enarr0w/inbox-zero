@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Inbox Zero Thunderbird Reader",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Read-only, account-scoped connection to a local Inbox Zero bridge.",
   "browser_specific_settings": {
     "gecko": {

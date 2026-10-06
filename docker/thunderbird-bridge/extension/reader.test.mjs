@@ -94,3 +94,14 @@ test("near-limit payloads leave space for the authenticated result envelope", as
   api.messages.getFull = mock.fn(async () => ({ contentType: "text/plain", body: "x".repeat(1024 * 1024 - 512) }));
   await assert.rejects(readCommand(api, command), { message: "TOO_LARGE" });
 });
+
+
+test("native RFC message wrappers expose the main body without importing attached messages", async () => {
+  const api = fixture();
+  api.messages.getFull = mock.fn(async () => ({ contentType: "message/rfc822", parts: [
+    { contentType: "text/plain", body: "Primary message" },
+    { contentType: "message/rfc822", parts: [{ contentType: "text/plain", body: "Attached message" }] },
+  ] }));
+  const result = await readCommand(api, { ...base, type: "getMessage", messageId: 1 });
+  assert.equal(result.message.textPlain, "Primary message");
+});

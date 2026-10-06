@@ -79,7 +79,7 @@
       const disposition = part.headers?.["content-disposition"];
       if (part.name || (Array.isArray(disposition) && disposition.some((value) => /^attachment\b|;\s*filename=/i.test(value)))) return;
       const type = String(part.contentType ?? "").toLowerCase().split(";")[0].trim();
-      if (type === "message/rfc822") return;
+      if (type === "message/rfc822" && depth > 0) return;
       if ((type === "text/plain" || type === "text/html") && typeof part.body === "string") {
         const field = type === "text/plain" ? "textPlain" : "textHtml";
         result[field] += part.body;
