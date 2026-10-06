@@ -186,3 +186,39 @@ test('stale native identities wait for a bounded query to finish before establis
   assert.equal(result.message.id,42);
   assert.equal(api.messages.continueList.mock.callCount(),1);
 });
+
+test('move receipts use scoped onMoved headers when the destination index is not ready', async () => {
+  const api = fixture();
+  const destination = {id:'archive1',accountId};
+  const listeners = new Set();
+  api.messages.onMoved = {addListener:listener=>listeners.add(listener),removeListener:listener=>listeners.delete(listener)};
+  api.folders.get = mock.fn(async () => destination);
+  api.messages.move = mock.fn(async () => {
+    assert.equal(listeners.size,1);
+    api.messages.get = mock.fn(async () => {throw new Error('Expired ID');});
+    for (const listener of listeners) {
+      listener({messages:[header()]},{messages:[{...header(9),folder:{id:'foreign',accountId:'other'}}]});
+      listener({messages:[header(2)]},{messages:[{...header(9),folder:destination}]});
+      setTimeout(() => listener({messages:[header()]},{messages:[{...header(9),folder:destination}]}),1);
+    }
+  });
+  const identity = {headerMessageId:header().headerMessageId,date:header().date.toISOString(),subject:header().subject};
+  const result = await readCommand(api,{...base,type:'moveMessage',operationId:'0123456789abcdef',messageId:1,identity,destinationFolderId:destination.id});
+  assert.equal(result.message.id,9);
+  assert.equal(result.message.folderId,destination.id);
+  assert.equal(api.messages.query.mock.callCount(),0);
+  assert.equal(api.messages.move.mock.callCount(),1);
+  assert.equal(listeners.size,0);
+});
+
+test('native move failure removes its receipt listener without replaying the write', async () => {
+  const api = fixture();
+  const listeners = new Set();
+  api.messages.onMoved = {addListener:listener=>listeners.add(listener),removeListener:listener=>listeners.delete(listener)};
+  api.folders.get = mock.fn(async () => ({id:'archive1',accountId}));
+  api.messages.move = mock.fn(async () => {throw new Error('Private provider failure');});
+  const identity = {headerMessageId:header().headerMessageId,date:header().date.toISOString(),subject:header().subject};
+  await assert.rejects(readCommand(api,{...base,type:'moveMessage',operationId:'0123456789abcdef',messageId:1,identity,destinationFolderId:'archive1'}),{message:'READ_FAILED'});
+  assert.equal(listeners.size,0);
+  assert.equal(api.messages.move.mock.callCount(),1);
+});

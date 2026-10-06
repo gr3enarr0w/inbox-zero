@@ -164,8 +164,7 @@
     const header = await resolveMessage(api,command);
     if (command.type === "moveMessage") {
       const folder = await api.folders.get(command.destinationFolderId); assertFolder(folder,command.accountId);
-      if (header.folder.id !== folder.id) await api.messages.move([header.id],folder.id);
-      const moved = await resolveMessage(api,command);
+      const moved = header.folder.id === folder.id ? header : await moveWithReceipt(api,command,header,folder);
       if (moved.folder.id !== folder.id) throw new ReaderError("WRITE_UNKNOWN");
       return {accountId:command.accountId,message:summary(moved)};
     }
@@ -175,6 +174,34 @@
     const updated = await resolveMessage(api,command);
     if ((command.read !== undefined && Boolean(updated.read) !== command.read) || (command.flagged !== undefined && Boolean(updated.flagged) !== command.flagged)) throw new ReaderError("WRITE_UNKNOWN");
     return {accountId:command.accountId,message:summary(updated)};
+  }
+  async function moveWithReceipt(api,command,header,folder) {
+    if (!api.messages.onMoved?.addListener || !api.messages.onMoved?.removeListener) throw new ReaderError("UNSUPPORTED");
+    let settle;
+    const receipt = new Promise(resolve => { settle = resolve; });
+    const matches = message => message?.folder?.accountId === command.accountId &&
+      message.headerMessageId === command.identity.headerMessageId &&
+      summary(message).date === command.identity.date && message.subject === command.identity.subject;
+    const listener = (original,moved) => {
+      try {
+        if (original?.id || moved?.id || original?.messages?.length !== 1 || moved?.messages?.length !== 1) return;
+        const source = original.messages[0], target = moved.messages[0];
+        if (source.id !== header.id || source.folder?.id !== header.folder.id || !matches(source) ||
+          target.folder?.id !== folder.id || !matches(target)) return;
+        settle(target);
+      } catch { /* Unrelated or malformed native events cannot acknowledge this write. */ }
+    };
+    api.messages.onMoved.addListener(listener);
+    const timer = setTimeout(() => settle(undefined),10_000);
+    try {
+      await api.messages.move([header.id],folder.id);
+      const moved = await receipt;
+      if (!moved) throw new ReaderError("WRITE_UNKNOWN");
+      return moved;
+    } finally {
+      clearTimeout(timer);
+      api.messages.onMoved.removeListener(listener);
+    }
   }
   function mimeHeaders(full) {
     const headers = {};
