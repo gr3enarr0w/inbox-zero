@@ -31,6 +31,7 @@ import {
 } from "@/utils/ai/draft-cleanup";
 import { isDuplicateError, isNotFoundError } from "@/utils/prisma-helpers";
 import type { Logger } from "@/utils/logger";
+import { getMailboxDeletionLoginGuard } from "@/utils/user/mailbox-login-guard";
 import {
   DELETE_ACCOUNT_REQUIRES_OWNER_TRANSFER_ERROR,
   DELETE_EMAIL_ACCOUNT_REQUIRES_OWNER_TRANSFER_ERROR,
@@ -144,6 +145,10 @@ export const deleteEmailAccountAction = actionClientUser
 
       if (!emailAccount) throw new SafeError("Email account not found");
       if (!emailAccount.accountId) throw new SafeError("Account id not found");
+      const loginGuard = await getMailboxDeletionLoginGuard(
+        userId,
+        emailAccount.accountId,
+      );
       const organizationIdsToDelete =
         await assertEmailAccountCanBeDeleted(emailAccountId);
 
@@ -208,7 +213,7 @@ export const deleteEmailAccountAction = actionClientUser
               },
             }),
             prisma.account.delete({
-              where: { id: emailAccount.accountId, userId },
+              where: { id: emailAccount.accountId, userId, ...loginGuard },
             }),
           ],
           { emailAccountId, logger, userEmail },
@@ -236,7 +241,7 @@ export const deleteEmailAccountAction = actionClientUser
               },
             }),
             prisma.account.delete({
-              where: { id: emailAccount.accountId, userId },
+              where: { id: emailAccount.accountId, userId, ...loginGuard },
             }),
           ],
           { emailAccountId, logger, userEmail },
