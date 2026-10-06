@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { redis } from "@/utils/redis";
 import { ProviderRateLimitModeError } from "@/utils/email/rate-limit-mode-error";
+import { SmarterMailApiError } from "@/utils/smartermail/errors";
 import { createTestLogger } from "@/__tests__/helpers";
 import {
   assertProviderNotRateLimited,
   getEmailProviderRateLimitState,
+  getProviderRateLimitDelayMs,
   recordRateLimitFromApiError,
   recordProviderRateLimitFromError,
   setEmailProviderRateLimitState,
@@ -22,6 +24,29 @@ vi.mock("@/utils/redis", () => ({
 const logger = createTestLogger();
 
 describe("email provider rate-limit state", () => {
+  it("bounds SmarterMail throttling backoff and ignores authentication failures", () => {
+    expect(
+      getProviderRateLimitDelayMs({
+        provider: "smartermail",
+        error: new SmarterMailApiError("Throttled", 429),
+        attemptNumber: 1,
+      }),
+    ).toBe(30_000);
+    expect(
+      getProviderRateLimitDelayMs({
+        provider: "smartermail",
+        error: new SmarterMailApiError("Throttled", 429),
+        attemptNumber: 20,
+      }),
+    ).toBe(300_000);
+    expect(
+      getProviderRateLimitDelayMs({
+        provider: "smartermail",
+        error: new SmarterMailApiError("Unauthorized", 401),
+        attemptNumber: 1,
+      }),
+    ).toBeNull();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
   });

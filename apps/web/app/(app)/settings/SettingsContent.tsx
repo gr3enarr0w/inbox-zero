@@ -54,6 +54,7 @@ import { useUser } from "@/hooks/useUser";
 import { useAccount } from "@/providers/EmailAccountProvider";
 import { cn } from "@/utils";
 import { env } from "@/env";
+import { SmarterMailSyncStatus } from "@/app/(app)/settings/SmarterMailSyncStatus";
 import { hasOrganizationAdminRole } from "@/utils/organizations/roles";
 
 export function SettingsContent() {
@@ -294,6 +295,9 @@ function EmailAccountSettingsCard({
 
       {expanded && (
         <>
+          {emailAccount.account.provider === "smartermail" && (
+            <SmarterMailSyncStatus emailAccountId={emailAccount.id} />
+          )}
           <SentMessageOpenTrackingSetting emailAccountId={emailAccount.id} />
           <OrgAnalyticsConsentSection emailAccountId={emailAccount.id} />
           <ToggleAllRulesSection emailAccountId={emailAccount.id} />

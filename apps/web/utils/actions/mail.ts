@@ -1,5 +1,7 @@
 "use server";
 
+import { getEmailProviderCapabilities } from "@/utils/email/capabilities";
+
 import { z } from "zod";
 import prisma from "@/utils/prisma";
 import { removeLabelFromMailSplits } from "@/utils/split-inbox/splits.server";
@@ -503,10 +505,8 @@ function assertMailboxItemMutationSupported({
   kind: "label" | "folder";
   provider: string;
 }) {
-  if (kind === "folder" && !isMicrosoftProvider(provider)) {
-    throw new SafeError(
-      "Folder actions are only available for Outlook accounts.",
-    );
+  if (kind === "folder" && !getEmailProviderCapabilities(provider).folders) {
+    throw new SafeError("This email provider does not support folder actions.");
   }
 }
 

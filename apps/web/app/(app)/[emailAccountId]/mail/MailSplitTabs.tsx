@@ -1,5 +1,7 @@
 "use client";
 
+import { getEmailProviderCapabilities } from "@/utils/email/capabilities";
+
 import { memo, type ReactNode, useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { getMailCategories } from "@/app/(app)/[emailAccountId]/mail/MailSidebar";
@@ -68,6 +70,7 @@ export const MailSplitTabs = memo(function MailSplitTabs({
   const { emailAccountId, provider } = useAccount();
   const isGoogle = isGoogleProvider(provider);
   const isOutlook = isMicrosoftProvider(provider);
+  const supportsSplits = getEmailProviderCapabilities(provider).splitInbox;
   const { userLabels: allLabels, mutate: mutateLabels } = useLabels();
   const { data: settings, mutate: mutateSettings } = useMailSettings();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -75,7 +78,7 @@ export const MailSplitTabs = memo(function MailSplitTabs({
   const countsById = useSplitCounts({
     accountIds: countAccountIds,
     splits,
-    enabled: true,
+    enabled: supportsSplits,
     portableLabelSplits,
     labelsByAccount,
   });
@@ -237,7 +240,7 @@ export const MailSplitTabs = memo(function MailSplitTabs({
         onSelect={onSelectSplit}
         onDelete={onDelete}
         onEdit={
-          isAllAccounts
+          isAllAccounts || !supportsSplits
             ? undefined
             : (splitId) => {
                 setEditingSplitId(splitId);
@@ -248,9 +251,9 @@ export const MailSplitTabs = memo(function MailSplitTabs({
           setEditingSplitId(null);
           setIsDialogOpen(true);
         }}
-        canCreateSplits={!isAllAccounts}
+        canCreateSplits={!isAllAccounts && supportsSplits}
       />
-      {!isAllAccounts && (
+      {!isAllAccounts && supportsSplits && (
         <NewSplitDialog
           open={isDialogOpen}
           onOpenChange={(open) => {

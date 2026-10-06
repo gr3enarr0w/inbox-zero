@@ -1,5 +1,7 @@
 "use client";
 
+import { getEmailProviderCapabilities } from "@/utils/email/capabilities";
+
 import type { ListThread } from "./types";
 
 import { MailPanelErrorBoundary } from "@/app/(app)/[emailAccountId]/mail/MailPanelErrorBoundary";
@@ -76,7 +78,7 @@ import {
 } from "@/providers/EmailAccountProvider";
 import {
   isGoogleProvider,
-  isMicrosoftProvider,
+  isSmarterMailProvider,
 } from "@/utils/email/provider-types";
 import { getOpenInMailboxLabel } from "@/utils/url";
 import { useEmailLabels } from "@/providers/EmailLabelsProvider";
@@ -123,7 +125,7 @@ export function MailShell() {
   const { emailAccount, emailAccountId, userEmail, provider } = useAccount();
   const { data: accountsData } = useAccounts();
   const isGoogle = isGoogleProvider(provider);
-  const isOutlook = isMicrosoftProvider(provider);
+  const providerCapabilities = getEmailProviderCapabilities(provider);
   const { userLabels } = useEmailLabels();
   const { userLabels: allLabels, mutate: mutateLabels } = useLabels();
   const { folders } = useFolders(provider);
@@ -847,8 +849,7 @@ export function MailShell() {
   // Outlook categories use the same engine membership command as Gmail labels.
   const canLabel =
     currentLabelTargets.length > 0 &&
-    (isGoogleProvider(labelAccount?.account.provider) ||
-      isMicrosoftProvider(labelAccount?.account.provider)) &&
+    getEmailProviderCapabilities(labelAccount?.account.provider).labels &&
     currentLabelTargets.every(
       (target) => target.emailAccountId === labelAccountId,
     );
@@ -1258,10 +1259,10 @@ export function MailShell() {
   );
   const searchFolders = useMemo(
     () =>
-      isOutlook && !isAllAccounts
+      providerCapabilities.folders && !isAllAccounts
         ? getMailSearchFolders(folders)
         : NO_SEARCH_OPTIONS,
-    [folders, isAllAccounts, isOutlook],
+    [folders, isAllAccounts, providerCapabilities.folders],
   );
   const showSplitTabs = !isScoped && !searchQuery;
   const threadCount = threads.length;
@@ -1379,7 +1380,8 @@ export function MailShell() {
                 searchFolders={searchFolders}
                 searchVariant={getMailSearchVariant({
                   isAllAccounts,
-                  isOutlook,
+                  isOutlook: providerCapabilities.folders,
+                  isNative: isSmarterMailProvider(provider),
                 })}
                 onToggleLayout={toggleLayout}
                 expandedPreview={expandedPreview}
@@ -1546,10 +1548,13 @@ export function MailShell() {
 function getMailSearchVariant({
   isAllAccounts,
   isOutlook,
+  isNative,
 }: {
   isAllAccounts: boolean;
   isOutlook: boolean;
-}): "gmail" | "outlook" | "common" {
+  isNative: boolean;
+}): "gmail" | "outlook" | "common" | "native" {
+  if (isNative) return "native";
   if (isAllAccounts) return "common";
   if (isOutlook) return "outlook";
   return "gmail";

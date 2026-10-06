@@ -1,4 +1,7 @@
-import { isMicrosoftProvider } from "@/utils/email/provider-types";
+import {
+  isMicrosoftProvider,
+  isSmarterMailProvider,
+} from "@/utils/email/provider-types";
 
 interface EmailTerminology {
   label: {
@@ -17,7 +20,7 @@ interface EmailTerminology {
 export function getEmailTerminology(provider: string): EmailTerminology {
   const isOutlook = isMicrosoftProvider(provider);
 
-  if (isOutlook) {
+  if (isOutlook || isSmarterMailProvider(provider)) {
     return {
       label: {
         singular: "category",

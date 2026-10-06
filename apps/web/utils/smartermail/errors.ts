@@ -1,0 +1,16 @@
+export class SmarterMailApiError extends Error {
+  readonly status?: number;
+
+  constructor(message: string, status?: number) {
+    super(message);
+    this.name = "SmarterMailApiError";
+    this.status = status;
+  }
+}
+
+export class SmarterMailMfaRequiredError extends Error {
+  constructor() {
+    super("SmarterMail requires a two-factor authentication code");
+    this.name = "SmarterMailMfaRequiredError";
+  }
+}

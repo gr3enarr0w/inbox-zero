@@ -17,6 +17,7 @@ model Account {
   updatedAt             DateTime      @updatedAt
   userId                String
   provider              String
+  smarterMailBaseUrl    String?
   type                  String        @default("oidc") // next-auth deprecated field
   providerAccountId     String
   refresh_token         String?       @db.Text
@@ -142,6 +143,9 @@ enum ApiKeyScope {
 
 // Migrating over to the new settings model. Currently most settings are in the User model, but will be moved to this model in the future.
 model EmailAccount {
+  smarterMailMailboxSessions SmarterMailMailboxSession[]
+  smarterMailSyncState SmarterMailSyncState?
+  smarterMailSyncMessages SmarterMailSyncMessage[]
   id        String   @id @default(cuid())
   email     String   @unique
   createdAt DateTime @default(now())
@@ -2765,4 +2769,54 @@ model ScimIdentityLink {
 
   @@unique([connectionId, externalId])
   @@index([userId])
+}
+
+model SmarterMailSyncState {
+  emailAccountId String @id
+  emailAccount EmailAccount @relation(fields: [emailAccountId], references: [id], onDelete: Cascade)
+  enabled Boolean @default(false)
+  cursor String?
+  failures Int @default(0)
+  nextRunAt DateTime @default(now())
+  leaseUntil DateTime?
+  leaseToken String?
+  lastSyncedAt DateTime?
+  updatedAt DateTime @updatedAt
+  @@index([enabled, nextRunAt])
+}
+
+model SmarterMailSyncMessage {
+  emailAccountId String
+  emailAccount EmailAccount @relation(fields: [emailAccountId], references: [id], onDelete: Cascade)
+  messageKey String
+  messageId String
+  status String @default("claimed")
+  createdAt DateTime @default(now())
+  processedAt DateTime?
+  @@id([emailAccountId, messageKey])
+  @@index([emailAccountId, status])
+}
+
+model SmarterMailMailboxSession {
+  id String @id
+  emailAccountId String
+  emailAccount EmailAccount @relation(fields: [emailAccountId], references: [id], onDelete: Cascade)
+  folderId String
+  after DateTime
+  generation Int @default(1)
+  updatedAt DateTime @updatedAt
+  messages SmarterMailMailboxMessage[]
+  @@index([emailAccountId, updatedAt])
+}
+
+model SmarterMailMailboxMessage {
+  sessionId String
+  session SmarterMailMailboxSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  messageId String
+  generation Int
+  missingScans Int @default(0)
+  lastMissingGeneration Int @default(0)
+  removed Boolean @default(false)
+  @@id([sessionId, messageId])
+  @@index([sessionId, generation, removed])
 }

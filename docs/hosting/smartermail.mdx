@@ -1,0 +1,80 @@
+---
+title: 'SmarterMail and Microsoft 365 with Docker'
+description: 'Self-hosted account setup, OpenAI-compatible inference, and polling limitations'
+---
+
+## Deployment
+
+SmarterMail support requires an image built from the fork containing this integration. The upstream `ghcr.io/elie222/inbox-zero:latest` image does not contain it. Use the same revision for web and worker and retain PostgreSQL and Redis volumes across upgrades. Apply the included Prisma migrations before starting that revision.
+
+Follow the [Docker deployment guide](/hosting/self-hosting) for TLS, database, Redis HTTP bridge, and application secrets. Configure `AUTH_SECRET`, `EMAIL_ENCRYPT_SECRET`, `EMAIL_ENCRYPT_SALT`, `INTERNAL_API_KEY`, and `CRON_SECRET` using generated values. Keep the encryption secrets stable across restarts; stored account tokens depend on them.
+
+For durable background jobs, configure:
+
+```dotenv
+QUEUE_BACKEND=bullmq
+REDIS_URL=redis://redis:6379
+INTERNAL_API_URL=http://web:3000
+NEXT_PUBLIC_BASE_URL=https://inbox.example.com
+NEXT_PUBLIC_BYPASS_PREMIUM_CHECKS=true
+```
+
+Enable the `queue-worker` profile in Docker Compose. The cron service calls `/api/cron/smartermail-sync` every minute with the cron bearer secret; the worker consumes the `smartermail-sync` queue. If overriding `WORKER_QUEUES`, include `smartermail-sync:1` alongside the existing queues. Restrict database and Redis ports to the Docker network or loopback interface.
+
+## LiteLLM or another OpenAI-compatible proxy
+
+The compatible provider is already built into Inbox Zero:
+
+```dotenv
+DEFAULT_LLMS=openai-compatible:mail-assistant
+OPENAI_COMPATIBLE_BASE_URL=http://litellm:4000/v1
+OPENAI_COMPATIBLE_MODEL=mail-assistant
+OPENAI_COMPATIBLE_AUTH_HEADER=authorization
+LLM_API_KEY=replace-with-proxy-key
+```
+
+`mail-assistant` must be a model alias configured by the proxy. The hostname must resolve from the web container; `localhost` refers to that container. Attach the proxy and web service to a shared Docker network, or use a reachable HTTPS endpoint. Store keys in the deployment environment, never in version control. Select a model capable of the application's structured output and tool use; compatibility of the HTTP format alone does not establish model compatibility.
+
+## Microsoft 365
+
+Configure `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET`, and `MICROSOFT_WEBHOOK_CLIENT_STATE`. Set `MICROSOFT_TENANT_ID` for a restricted tenant, or leave it unset for the existing common-tenant flow. Register `https://inbox.example.com/api/auth/callback/microsoft` as the redirect URI and follow the [Microsoft configuration guide](/hosting/microsoft).
+
+Sign in and connect the Microsoft mailbox using the existing Microsoft account flow. Microsoft notifications require an externally reachable HTTPS app URL; polling for SmarterMail does not replace Microsoft subscriptions.
+
+## SmarterMail accounts
+
+Connect each SmarterMail mailbox separately from the account settings using its HTTPS server base URL and mailbox credentials. Credentials are used to obtain SmarterMail tokens; the password is not saved. Tokens are encrypted using the application's existing account-token storage. MFA requirements or server policy may prevent password-based API authentication; use an account supported by the configured server policy.
+
+Before enabling rules, create the categories `Inbox Zero/Archived`, `Inbox Zero/Read`, `Inbox Zero/Unsubscribed`, `Inbox Zero/Processing`, `Inbox Zero/Processed`, and `Inbox Zero/Assistant` in SmarterMail, plus any categories used by your own rules. This version can assign existing categories but does not create new categories. Create and enable the desired AI rules and enable automatic processing for each mailbox. Each account has its own cursor, retry schedule, and processed-message records. SmarterMail mail access uses the server API, not generic IMAP/SMTP. Microsoft 365 accounts continue using their existing provider.
+
+## Verification
+
+1. Check that web, database, Redis, Redis HTTP bridge, worker, and cron containers are healthy or running.
+2. Check worker logs for `smartermail-sync` and cron logs for HTTP errors.
+3. Connect a dedicated test mailbox and confirm inbox listing and reading before enabling automation.
+4. Enable a harmless rule in the test mailbox and deliver a new test message. Confirm it is processed once, then restart web and worker and confirm it is not processed again.
+5. Query `/api/user/smartermail-sync-status` through the authenticated app session with the current email-account header to inspect `lastSyncedAt`, `failures`, and up to 50 outstanding processing records. Records marked `retry_ready` failed before any persisted rule execution and may be retried with the account settings retry control. Records marked `claimed` may still be in progress; after their account lease expires they require review. `review_required` means processing errored after claiming the message.
+6. Stop the test server temporarily and confirm `nextRunAt` backs off; restore access and confirm polling resumes. Reconnect an account if its refresh token is revoked.
+
+These are deployment acceptance checks to perform on a test account. Unit tests use mocks; they do not certify a particular SmarterMail installation.
+
+## Current limitations and recovery
+
+Polling scans one inbox page of up to 25 messages per job, continues with a durable page cursor, then repeats from the beginning. Initial scans include existing inbox messages when automation is enabled. Configure rules with this behavior in mind before enabling processing. Offset pagination can shift when mail arrives or moves; repeated scans eventually revisit the inbox, but this is not a delta protocol and cannot guarantee capturing short-lived inbox messages.
+
+The mobile mailbox sync and browser local-mail sync protocols support per-folder snapshot reconciliation. Cursors and inventory are persisted in PostgreSQL and scoped to each account, folder, and client session. Each local or mobile sync request scans at most 20 messages; the same cursor can resume after restarting the application. Local sync reserves capacity for each actual HTTP call, including listings, message hydration, folder and presence checks, and token refresh. The configured envelope is 60 calls per account per minute and 600 across the app, with half reserved from backfill use. Each scoped local operation has a 60-second deadline; denied admission pauses progress without contacting the mail server. Automation uses its existing request behavior. After two completed scans miss a message, a separate selected-UID server lookup must confirm that it is absent before the client is told to remove its old folder reference. Malformed, incomplete, or unavailable presence responses stop reconciliation. Moves appear as removal from the old folder and insertion into the new folder; the protocol does not claim to distinguish moves from permanent deletions. Native SmarterMail message IDs are folder-scoped. When an RFC Message-ID is present it is hashed for automation deduplication across moves; messages without that header use their folder/message identifier and can be seen again after a move. Messages deliberately reusing the same RFC Message-ID are deduplicated within an account.
+
+Automation claims a message before running rules. Completed, failed, and crash-interrupted claims are never replayed automatically because an external action may already have succeeded. Review the outstanding records and actual mailbox actions before deliberately rerunning a message through the existing manual AI workflow. Do not delete a claim merely to retry: doing so may repeat sending, forwarding, or moving mail. An account scan resumes after restart; ambiguous message processing requires operator review.
+
+Automatic polling invokes the existing AI rule engine. It does not add a separate classifier, generic IMAP support, document filing, or a sent-folder reply-tracking poll. Provider features that are not implemented return explicit unsupported-operation errors. RFC Message-ID, In-Reply-To, and References support bounded conversation lookup; it is limited to 20 referenced ancestors and 100 candidate messages per lookup. Basic sender, date, read, starred, and category search are implemented. Attachment transfer, new category creation, server filters, sending, and provider settings remain unsupported. These limits must be checked against the rules you enable.
+
+| Remaining provider capability | Tracking issue |
+| --- | --- |
+| Sending, forwarding mail, and sending saved drafts | [#8](https://github.com/gr3enarr0w/inbox-zero/issues/8) |
+| Attachment downloads and streaming | [#18](https://github.com/gr3enarr0w/inbox-zero/issues/18) |
+| Category creation and editing | [#19](https://github.com/gr3enarr0w/inbox-zero/issues/19) |
+| Native server filters | [#20](https://github.com/gr3enarr0w/inbox-zero/issues/20) |
+| Signatures | [#21](https://github.com/gr3enarr0w/inbox-zero/issues/21) |
+| Contact photos | [#22](https://github.com/gr3enarr0w/inbox-zero/issues/22) |
+| Forwarding settings | [#23](https://github.com/gr3enarr0w/inbox-zero/issues/23) |
+| Bulk participant lookup and outbound history | [#24](https://github.com/gr3enarr0w/inbox-zero/issues/24) |

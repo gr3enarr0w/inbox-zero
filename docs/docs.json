@@ -124,6 +124,7 @@
             "group": "Self-Hosting",
             "pages": [
               "hosting/self-hosting",
+              "hosting/smartermail",
               "hosting/environment-variables",
               "hosting/production-operations",
               "hosting/security-hardening",

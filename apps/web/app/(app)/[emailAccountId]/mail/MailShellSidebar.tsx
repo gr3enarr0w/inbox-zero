@@ -1,5 +1,7 @@
 "use client";
 
+import { getEmailProviderCapabilities } from "@/utils/email/capabilities";
+
 import { type CSSProperties, memo, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import { MailAccountSwitcher } from "@/app/(app)/[emailAccountId]/mail/MailAccountSwitcher";
@@ -81,6 +83,7 @@ export const MailShellSidebar = memo(function MailShellSidebar({
   const { emailAccountId, provider } = useAccount();
   const isGoogle = isGoogleProvider(provider);
   const isOutlook = isMicrosoftProvider(provider);
+  const capabilities = getEmailProviderCapabilities(provider);
   const terminology = getEmailTerminology(provider);
   const { userLabels: allLabels, mutate: mutateLabels } = useLabels();
   const { folders, mutate: mutateFolders } = useFolders(provider);
@@ -201,7 +204,9 @@ export const MailShellSidebar = memo(function MailShellSidebar({
           activeFolderId={activeFolderId}
           hrefFor={hrefFor}
           labels={isAllAccounts ? NO_LABELS : allLabels}
-          folders={isAllAccounts || !isOutlook ? NO_FOLDERS : folders}
+          folders={
+            isAllAccounts || !capabilities.folders ? NO_FOLDERS : folders
+          }
           countsById={isAllAccounts ? NO_COUNTS : countsById}
           categories={
             isAllAccounts
@@ -214,6 +219,7 @@ export const MailShellSidebar = memo(function MailShellSidebar({
           labelSingular={terminology.label.singular}
           backToAppHref={prefixPath(emailAccountId, "/automation")}
           onCompose={openCompose}
+          readOnlyLabels={!capabilities.categoryEditing}
           onCreateLabel={onCreateLabel}
           onEditMailboxItem={onEditMailboxItem}
           onDeleteMailboxItem={onDeleteMailboxItem}

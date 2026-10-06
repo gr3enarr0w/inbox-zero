@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { LocalMailSyncPausedError } from "@/utils/email/local-mail-sync-budget";
 import { InvalidMailboxSyncCursorError } from "@/utils/email/mailbox-sync";
 
 const { getMailboxSyncPageMock } = vi.hoisted(() => ({
@@ -103,6 +104,24 @@ describe("POST /api/mobile/mailbox-sync", () => {
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
       error: "Invalid mailbox sync cursor",
+    });
+  });
+  it("returns a retry delay when local synchronization admission is paused", async () => {
+    getMailboxSyncPageMock.mockRejectedValueOnce(
+      new LocalMailSyncPausedError(45_000),
+    );
+    const response = await POST(
+      new NextRequest("http://localhost:3000/api/mobile/mailbox-sync", {
+        method: "POST",
+        body: JSON.stringify({ cursor: "checkpoint" }),
+      }),
+      {} as never,
+    );
+    expect(response.status).toBe(429);
+    expect(response.headers.get("Retry-After")).toBe("45");
+    await expect(response.json()).resolves.toEqual({
+      error: "Mailbox sync paused",
+      retryAfterMs: 45_000,
     });
   });
 });

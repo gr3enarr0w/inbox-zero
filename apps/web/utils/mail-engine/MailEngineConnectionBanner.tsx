@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { toastError } from "@/components/Toast";
 import { useAccount } from "@/providers/EmailAccountProvider";
 import { getAccountLinkingUrl } from "@/utils/account-linking";
-import { isMicrosoftProvider } from "@/utils/email/provider-types";
+import { getMailEngineProvider } from "@/utils/mail-engine/provider";
 import { mailEngineConnectionCopy } from "@/utils/mail-engine/connection-notice";
 import { redirectToSafeUrl } from "@/utils/redirect";
 
@@ -64,11 +64,12 @@ export const MailEngineConnectionBanner = memo(
             <Button
               disabled={reconnecting || !emailAccountId}
               onClick={() => {
+                const mailProvider = getMailEngineProvider(provider);
+                if (!mailProvider) return;
                 setReconnecting(true);
-                getAccountLinkingUrl(
-                  isMicrosoftProvider(provider) ? "microsoft" : "google",
-                  { reconnectEmailAccountId: emailAccountId },
-                )
+                getAccountLinkingUrl(mailProvider, {
+                  reconnectEmailAccountId: emailAccountId,
+                })
                   .then((url) =>
                     redirectToSafeUrl(url, { allowExternal: true }),
                   )
