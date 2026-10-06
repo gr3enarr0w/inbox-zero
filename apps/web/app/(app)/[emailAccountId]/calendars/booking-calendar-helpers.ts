@@ -1,3 +1,7 @@
+import {
+  isGoogleProvider,
+  isMicrosoftProvider,
+} from "@/utils/email/provider-types";
 import { BookingLinkLocationType } from "@/generated/prisma/enums";
 import {
   getProviderVideoLocationType,
@@ -23,14 +27,20 @@ export function getSelectedCalendarProvider(
   destinationCalendarId: string,
 ) {
   const calendars =
-    data?.calendarConnections.flatMap((connection) =>
-      connection.calendars.map((calendar) => ({
-        id: calendar.id,
-        isEnabled: calendar.isEnabled,
-        primary: calendar.primary,
-        provider: connection.provider,
-      })),
-    ) ?? [];
+    data?.calendarConnections
+      .filter(
+        (connection) =>
+          isGoogleProvider(connection.provider) ||
+          isMicrosoftProvider(connection.provider),
+      )
+      .flatMap((connection) =>
+        connection.calendars.map((calendar) => ({
+          id: calendar.id,
+          isEnabled: calendar.isEnabled,
+          primary: calendar.primary,
+          provider: connection.provider,
+        })),
+      ) ?? [];
 
   if (destinationCalendarId) {
     return (
@@ -83,15 +93,21 @@ export function getCalendarOptions(data: BookingLinkCalendarData | undefined) {
 
 function getCalendars(data: BookingLinkCalendarData | undefined) {
   return (
-    data?.calendarConnections.flatMap((connection) =>
-      connection.calendars
-        .filter((calendar) => calendar.isEnabled)
-        .map((calendar) => ({
-          id: calendar.id,
-          isEnabled: calendar.isEnabled,
-          name: calendar.name,
-          primary: calendar.primary,
-        })),
-    ) ?? []
+    data?.calendarConnections
+      .filter(
+        (connection) =>
+          isGoogleProvider(connection.provider) ||
+          isMicrosoftProvider(connection.provider),
+      )
+      .flatMap((connection) =>
+        connection.calendars
+          .filter((calendar) => calendar.isEnabled)
+          .map((calendar) => ({
+            id: calendar.id,
+            isEnabled: calendar.isEnabled,
+            name: calendar.name,
+            primary: calendar.primary,
+          })),
+      ) ?? []
   );
 }

@@ -127,6 +127,7 @@ describe("createCalendarEvent", () => {
           connection: {
             emailAccountId: "email-account-id",
             isConnected: true,
+            provider: { in: ["google", "microsoft"] },
           },
         },
         orderBy: [{ primary: "desc" }, { createdAt: "asc" }],

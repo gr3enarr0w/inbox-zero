@@ -10,6 +10,14 @@ Repeat for each mailbox. Each mailbox has its own EmailAccount, provider account
 
 This connects mailboxes to an authenticated Inbox Zero user; it does not enable password-based application login or change existing authentication policy.
 
+## Calendar connection
+
+After connecting a mailbox, open **Calendars** and choose **Add SmarterMail Calendar**. The connection reuses that mailbox's authenticated session; no separate OAuth registration or saved calendar password is required.
+
+Personal calendars support event reading and availability checks. Shared calendars, subscribed calendars, tasks, and domain resources are excluded. Uncancelled events are conservatively treated as busy, so events marked free may reduce suggested availability. Queries are bounded to 93 days and 20 calendars; attendee detail searches require smaller windows when more than 25 events match.
+
+Creating, editing, deleting, and responding to calendar invitations are not supported. SmarterMail calendars cannot be selected as booking destinations. Google and Microsoft calendar connections can still provide a booking destination.
+
 ## Categories before automatic processing
 
 Create the categories required by your rules in SmarterMail first. The provider can apply and remove existing categories, but creating, renaming, deleting, or recoloring categories is unavailable while the documented whole-settings replacement API lacks verified concurrency protection. Inbox Zero will report an explicit error when a required category does not exist; it will not overwrite the server's category collection.

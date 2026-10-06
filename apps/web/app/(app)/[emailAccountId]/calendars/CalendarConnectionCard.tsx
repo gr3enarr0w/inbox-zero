@@ -10,6 +10,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import {
+  CalendarIcon,
   Trash2Icon,
   XCircle,
   ChevronDown,
@@ -47,6 +48,11 @@ interface CalendarConnectionCardProps {
 
 const getProviderInfo = (provider: string) => {
   const providers = {
+    smartermail: {
+      name: "SmarterMail Calendar",
+      icon: null,
+      alt: "SmarterMail Calendar",
+    },
     microsoft: {
       name: "Microsoft Calendar",
       icon: "/images/product/outlook-calendar.svg",
@@ -146,13 +152,17 @@ export function CalendarConnectionCard({
       <CardHeader className="p-4">
         <div className="flex items-center justify-between">
           <div className="flex min-w-0 items-center gap-3">
-            <Image
-              src={providerInfo.icon}
-              alt={providerInfo.alt}
-              width={32}
-              height={32}
-              unoptimized
-            />
+            {providerInfo.icon ? (
+              <Image
+                src={providerInfo.icon}
+                alt={providerInfo.alt}
+                width={32}
+                height={32}
+                unoptimized
+              />
+            ) : (
+              <CalendarIcon className="size-8 shrink-0" aria-hidden="true" />
+            )}
             <div className="min-w-0">
               <CardTitle className="text-lg">{providerInfo.name}</CardTitle>
               <CardDescription className="flex items-center gap-2">
@@ -197,6 +207,13 @@ export function CalendarConnectionCard({
       </CardHeader>
       <Separator className="mb-4" />
       <CardContent className="p-4 pt-0">
+        {connection.provider === "smartermail" && (
+          <TypographyP className="mb-4 text-sm">
+            Personal calendar events and availability are supported. Calendar
+            editing and invitation responses are unavailable. All uncancelled
+            events count as busy.
+          </TypographyP>
+        )}
         {calendars.length > 0 ? (
           <Collapsible open={isOpen} onOpenChange={setIsOpen}>
             <CollapsibleTrigger asChild>
