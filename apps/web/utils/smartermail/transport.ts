@@ -1,4 +1,6 @@
 import "server-only";
+import { getSmarterMailLocalSyncContext } from "@/utils/smartermail/local-sync-context";
+import { withLocalMailSyncBudget } from "@/utils/email/local-mail-sync-budget";
 import { SmarterMailApiError } from "./errors";
 
 export class SmarterMailTransport {
@@ -37,7 +39,40 @@ export class SmarterMailTransport {
     body?: Record<string, unknown>,
     accessToken?: string,
   ): Promise<unknown> {
-    const signal = AbortSignal.timeout(this.timeoutMs);
+    const localSync = getSmarterMailLocalSyncContext();
+    if (localSync) {
+      localSync.signal.throwIfAborted();
+      return withLocalMailSyncBudget(
+        {
+          emailAccountId: localSync.emailAccountId,
+          provider: "smartermail",
+          priority: localSync.priority,
+          cost: 1,
+        },
+        (budgetSignal) =>
+          this.performRequest(
+            path,
+            method,
+            body,
+            accessToken,
+            AbortSignal.any([localSync.signal, budgetSignal]),
+          ),
+      );
+    }
+    return this.performRequest(path, method, body, accessToken);
+  }
+
+  private async performRequest(
+    path: string,
+    method: string,
+    body?: Record<string, unknown>,
+    accessToken?: string,
+    parentSignal?: AbortSignal,
+  ): Promise<unknown> {
+    const timeoutSignal = AbortSignal.timeout(this.timeoutMs);
+    const signal = parentSignal
+      ? AbortSignal.any([timeoutSignal, parentSignal])
+      : timeoutSignal;
     let response: Response;
     try {
       response = await fetch(`${this.baseUrl}${path}`, {

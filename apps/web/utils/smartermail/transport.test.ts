@@ -3,6 +3,8 @@ import { SmarterMailTransport } from "./transport";
 
 afterEach(() => vi.unstubAllGlobals());
 
+vi.mock("@/utils/redis", () => ({ redis: { eval: vi.fn() } }));
+
 describe("SmarterMail transport", () => {
   it("does not follow a redirect carrying credentials", async () => {
     const fetchMock = vi
