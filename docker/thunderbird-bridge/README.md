@@ -24,7 +24,7 @@ ID. Do not infer it from its email address or a folder path. The operator cannot
 select another account. See Thunderbird's [accounts API](https://webextension-api.thunderbird.net/en/esr-mv2/accounts.html).
 
 Package `extension/manifest.json`, `extension/background.js` and
-`extension/reader.js` as an XPI with a private `config.json`:
+`extension/reader.js` and `extension/bounded-read.js` as an XPI with a private `config.json`:
 
 ```json
 {"bridgeToken":"REPLACE_WITH_BRIDGE_TOKEN"}
@@ -63,5 +63,5 @@ claiming school synchronization is working.
 Run companion and reader tests with Node 24:
 
 ```sh
-node --test docker/thunderbird-bridge/server.test.mjs docker/thunderbird-bridge/extension/reader.test.mjs
+node --test docker/thunderbird-bridge/server.test.mjs docker/thunderbird-bridge/extension/reader.test.mjs docker/thunderbird-bridge/extension/bounded-read.test.mjs
 ```

@@ -2,7 +2,7 @@
 
 (() => {
   const codes = new Set(["ACCOUNT_NOT_FOUND", "MESSAGE_NOT_FOUND", "OUT_OF_SCOPE", "READ_FAILED", "UNSUPPORTED", "TOO_LARGE"]);
-  const maximumBytes = 1024 * 1024;
+  const maximumBytes = 1024 * 1024 - 1024;
   class ReaderError extends Error {
     constructor(code) { super(code); this.code = code; }
   }

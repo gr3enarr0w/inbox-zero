@@ -83,3 +83,14 @@ test("unknown operations and unbounded or extra arguments fail before native acc
     await assert.rejects(readCommand(api, command), { message: "UNSUPPORTED" });
   assert.equal(api.accounts.get.mock.callCount(), 0);
 });
+
+
+test("near-limit payloads leave space for the authenticated result envelope", async () => {
+  const api = fixture();
+  const command = { ...base, nonce: "a".repeat(64), type: "getMessage", messageId: 1 };
+  api.messages.getFull = mock.fn(async () => ({ contentType: "text/plain", body: "x".repeat(1024 * 1024 - 2048) }));
+  const result = await readCommand(api, command);
+  assert.ok(new TextEncoder().encode(JSON.stringify({ nonce: command.nonce, result })).byteLength < 1024 * 1024);
+  api.messages.getFull = mock.fn(async () => ({ contentType: "text/plain", body: "x".repeat(1024 * 1024 - 512) }));
+  await assert.rejects(readCommand(api, command), { message: "TOO_LARGE" });
+});

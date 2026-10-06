@@ -4,6 +4,7 @@
   const messenger = globalThis.messenger;
   const reader = globalThis.InboxZeroThunderbirdReader;
   const baseUrl = "http://127.0.0.1:8787";
+  const read = globalThis.InboxZeroBoundedRead.createBoundedRead((command) => reader.readCommand(messenger, command));
   const pause = () => new Promise((resolve) => setTimeout(resolve, 2000));
   async function run() {
     const configResponse = await fetch(messenger.runtime.getURL("config.json"));
@@ -21,7 +22,7 @@
         const command = JSON.parse(raw);
         let payload;
         try {
-          const result = await reader.readCommand(messenger, command);
+          const result = await read(command);
           payload = { nonce: command.nonce, result };
         } catch (error) {
           if (typeof command?.nonce !== "string" || !/^[A-Za-z0-9_-]{16,128}$/.test(command.nonce)) continue;
