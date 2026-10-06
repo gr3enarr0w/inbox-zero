@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { SmarterMailClient } from "@/utils/smartermail/client";
-import { SmarterMailUnsupportedError } from "@/utils/smartermail/provider/error";
 import { listingSchema } from "@/utils/smartermail/provider/schemas";
 
 const cursorSchema = z.object({
@@ -33,10 +32,6 @@ export async function fetchSmarterMailFolderPage({
   if (!scope || folders.some((folder) => !folder))
     throw new Error("Invalid SmarterMail folder scope");
   const inventory = [...new Set(folders)].sort();
-  if (inventory.length > 20)
-    throw new SmarterMailUnsupportedError(
-      "global queries across more than 20 owned folders",
-    );
   const fingerprint = createHash("sha256")
     .update(JSON.stringify(canonical({ scope, folders: inventory, body })))
     .digest("hex");
@@ -59,10 +54,16 @@ export async function fetchSmarterMailFolderPage({
   const results: Array<
     z.infer<typeof listingSchema>["results"][number] & { folder: string }
   > = [];
-  while (index < inventory.length && results.length < take) {
+  let folderRequests = 0;
+  while (
+    index < inventory.length &&
+    results.length < take &&
+    folderRequests < 20
+  ) {
     signal?.throwIfAborted();
     const folder = inventory[index]!;
     const remaining = take - results.length;
+    folderRequests++;
     const page = listingSchema.parse(
       await client.request("search", {
         ...body,

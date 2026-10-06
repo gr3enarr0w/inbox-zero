@@ -14,6 +14,7 @@ const policies = {
   google: { account: 1200, app: 120_000, maximumCost: 500 },
   microsoft: { account: 60, app: 600, maximumCost: 1 },
   smartermail: { account: 60, app: 600, maximumCost: 1 },
+  thunderbird: { account: 60, app: 600, maximumCost: 1 },
 };
 export const gmailMailSyncCosts = {
   profile: 1,

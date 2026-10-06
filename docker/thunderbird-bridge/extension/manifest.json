@@ -1,8 +1,8 @@
 {
   "manifest_version": 2,
-  "name": "Inbox Zero Thunderbird Reader",
-  "version": "0.1.3",
-  "description": "Read-only, account-scoped connection to a local Inbox Zero bridge.",
+  "name": "Inbox Zero Thunderbird Bridge",
+  "version": "0.2.1",
+  "description": "Account-scoped mail reads, classification folders, and draft persistence.",
   "browser_specific_settings": {
     "gecko": {
       "id": "thunderbird-reader@inboxzero.local",
@@ -12,11 +12,19 @@
   "permissions": [
     "accountsRead",
     "messagesRead",
-    "http://127.0.0.1/*"
+    "http://127.0.0.1/*",
+    "storage",
+    "accountsFolders",
+    "messagesMove",
+    "messagesUpdate",
+    "compose",
+    "compose.save"
   ],
   "background": {
     "scripts": [
+      "protocol.js",
       "reader.js",
+      "ledger.js",
       "bounded-read.js",
       "background.js"
     ],

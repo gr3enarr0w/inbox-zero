@@ -17,6 +17,9 @@ describe("mailbox deletion login access", () => {
     await expect(
       getMailboxDeletionLoginGuard("user", "login-account"),
     ).rejects.toThrow("enable email code sign-in");
+    expect(prisma.account.count.mock.calls[0][0]?.where).toMatchObject({
+      provider: { in: ["smartermail", "thunderbird"] },
+    });
     expect(prisma.user.findFirst.mock.calls[0][0]?.where).toMatchObject({
       id: "user",
       OR: [

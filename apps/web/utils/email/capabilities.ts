@@ -2,6 +2,7 @@ import {
   isGoogleProvider,
   isMicrosoftProvider,
   isSmarterMailProvider,
+  isThunderbirdProvider,
 } from "@/utils/email/provider-types";
 
 export function getEmailProviderCapabilities(
@@ -10,9 +11,10 @@ export function getEmailProviderCapabilities(
   const google = isGoogleProvider(provider);
   const microsoft = isMicrosoftProvider(provider);
   const smarterMail = isSmarterMailProvider(provider);
+  const thunderbird = isThunderbirdProvider(provider);
   return {
-    folders: microsoft || smarterMail,
-    labels: google || microsoft || smarterMail,
+    folders: microsoft || smarterMail || thunderbird,
+    labels: google || microsoft || smarterMail || thunderbird,
     categoryEditing: google || microsoft,
     sending: google || microsoft,
     splitInbox: google || microsoft,

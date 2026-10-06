@@ -4,13 +4,14 @@
   const messenger = globalThis.messenger;
   const reader = globalThis.InboxZeroThunderbirdReader;
   const baseUrl = "http://127.0.0.1:8787";
-  const read = globalThis.InboxZeroBoundedRead.createBoundedRead((command) => reader.readCommand(messenger, command));
   const pause = () => new Promise((resolve) => setTimeout(resolve, 2000));
   async function run() {
     const configResponse = await fetch(messenger.runtime.getURL("config.json"));
     if (!configResponse.ok) return;
     const config = await configResponse.json();
     if (typeof config.bridgeToken !== "string" || !/^[A-Za-z0-9_-]{32,256}$/.test(config.bridgeToken)) return;
+    const execute = globalThis.InboxZeroThunderbirdLedger.createLedger(messenger.storage.local, (command) => reader.readCommand(messenger, command, { draftsAccountId: config.draftsAccountId, draftsIdentityId: config.draftsIdentityId }));
+    const read = globalThis.InboxZeroBoundedRead.createBoundedRead(execute);
     const headers = { Authorization: `Bearer ${config.bridgeToken}`, "Content-Type": "application/json" };
     while (true) {
       try {
@@ -18,7 +19,7 @@
         if (response.status === 204) continue;
         if (!response.ok) { await pause(); continue; }
         const raw = await response.text();
-        if (raw.length > 65_536) { await pause(); continue; }
+        if (raw.length > 1_048_576) { await pause(); continue; }
         const command = JSON.parse(raw);
         let payload;
         try {

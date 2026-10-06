@@ -6,6 +6,7 @@ import {
 } from "./conversation-index";
 import { migrateMessageSearchIndex } from "./message-search-index";
 import { migrateAccountProviders } from "./account-provider-migration";
+import { migrateThunderbirdAccounts } from "./thunderbird-account-migration";
 
 export const MAILBOX_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -411,4 +412,5 @@ export async function migrateMailbox(
   await migrateInboxUnreadExcludesArchive(tx);
   await migrateMessageSearchIndex(tx);
   await migrateAccountProviders(tx);
+  await migrateThunderbirdAccounts(tx);
 }

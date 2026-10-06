@@ -6,10 +6,14 @@ export async function getMailboxDeletionLoginGuard(
   userId: string,
   accountId: string,
 ) {
-  const remainingSmarterMail = await prisma.account.count({
-    where: { userId, provider: "smartermail", id: { not: accountId } },
+  const remainingNativeMailbox = await prisma.account.count({
+    where: {
+      userId,
+      provider: { in: ["smartermail", "thunderbird"] },
+      id: { not: accountId },
+    },
   });
-  if (!remainingSmarterMail) return {};
+  if (!remainingNativeMailbox) return {};
   const loginProviders = Array.from(getEnabledLoginProviders());
   const user = {
     OR: [

@@ -31,7 +31,7 @@ export { browserMailEngineCapabilities };
 export type BrowserMailEngine = MailEngine & {
   ensureAccount(input: {
     accountId: string;
-    provider: "google" | "microsoft" | "smartermail";
+    provider: "google" | "microsoft" | "smartermail" | "thunderbird";
     generation?: string;
   }): Promise<void>;
 };

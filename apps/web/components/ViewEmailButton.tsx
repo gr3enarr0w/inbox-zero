@@ -6,6 +6,7 @@ import { useAccount } from "@/providers/EmailAccountProvider";
 import {
   isGoogleProvider,
   isSmarterMailProvider,
+  isThunderbirdProvider,
 } from "@/utils/email/provider-types";
 
 export function ViewEmailButton({
@@ -22,7 +23,11 @@ export function ViewEmailButton({
   const { provider } = useAccount();
   const { showEmail } = useDisplayedEmail();
 
-  if (!isGoogleProvider(provider) && !isSmarterMailProvider(provider)) {
+  if (
+    !isGoogleProvider(provider) &&
+    !isSmarterMailProvider(provider) &&
+    !isThunderbirdProvider(provider)
+  ) {
     return null;
   }
 

@@ -1,67 +1,84 @@
-# Thunderbird bridge staging
+# Thunderbird bridge
 
-This companion stages a private, read-only connection to one Thunderbird account.
-It is **not yet an Inbox Zero email provider**: mailbox enrollment, classification,
-folder mapping, durable action acknowledgements and draft persistence remain tracked
-in the Thunderbird bridge issue. A healthy companion alone does not establish a
-working email connection.
+This companion connects one existing Thunderbird account to Inbox Zero. OAuth
+sessions remain in Thunderbird; no tokens are exported or other application
+identities reused. Supported operations are bounded mail reads and searches,
+folder classification, read/star flags, and saving native drafts. Sending,
+permanent deletion, calendar access, and draft replacement are unsupported.
 
-The MailExtension uses Thunderbird's existing account session. Microsoft OAuth
-credentials remain in Thunderbird. There are no send, move, modify or compose
-permissions, and no generic JavaScript execution endpoint.
+## Private deployment
 
-## Deployment
+Use Thunderbird 140 ESR or later. Run the companion in the Thunderbird container's
+network namespace. Default binding is loopback; to connect Inbox Zero, set
+`BRIDGE_BIND_ADDRESS=0.0.0.0` and join Thunderbird to the private Docker network
+used by Inbox Zero. Do not publish port 8787 or add a reverse proxy. Both roles
+require distinct random bearer tokens with at least 32 bytes of entropy, stored
+in mounted private files. Only the extension receives the bridge token; only
+Inbox Zero receives the operator token.
 
-Use Thunderbird 140 ESR or later. Run one companion per user/account, sharing the
-Thunderbird container's network namespace. Its listener must stay on loopback;
-do not publish the port or add a reverse proxy. Thunderbird host-permission patterns do not support port numbers; the manifest permits loopback HTTP while the extension transport remains fixed to port 8787. Generate two different random
-bearer tokens of at least 32 bytes, store them in private files, and mount them
-read-only at the paths in `compose.example.yml`. The operator token must not be
-included in the extension.
-
-Set `THUNDERBIRD_ACCOUNT_ID` to the selected account's actual Thunderbird account
-ID. Do not infer it from its email address or a folder path. The operator cannot
-select another account. See Thunderbird's [accounts API](https://webextension-api.thunderbird.net/en/esr-mv2/accounts.html).
-
-Package `extension/manifest.json`, `extension/background.js` and
-`extension/reader.js` and `extension/bounded-read.js` as an XPI with a private `config.json`:
+Set `THUNDERBIRD_ACCOUNT_ID` to the native account ID. The broker fixes this binding
+and refuses caller-supplied accounts. Package every JavaScript file listed in
+`extension/manifest.json`, the manifest, and a private `config.json` into an XPI:
 
 ```json
 {"bridgeToken":"REPLACE_WITH_BRIDGE_TOKEN"}
 ```
 
-Keep the generated XPI private: it contains the bridge bearer token. Neither the
-configuration nor the packaged XPI belongs in Git. Install it through Thunderbird's
-add-on manager or an existing enterprise `ExtensionSettings` policy using a
-local `file:///` install URL. Preserve unrelated enterprise policies. See the
-[Thunderbird policy documentation](https://thunderbird.github.io/policy-templates/).
+Draft saving is disabled by default. After pinning the selected identity's native
+Drafts preference to its own IMAP mailbox, disabling additional FCC copies, and
+verifying an owned Drafts folder exists, add `draftsAccountId` and
+`draftsIdentityId` to the private extension configuration. These must match the
+fixed account and an identity belonging to it. Thunderbird's supported APIs do
+not expose its Drafts preference, so the administrator must verify and preserve
+that profile configuration. The extension clears FCC copies and checks every
+saved message's account scope.
 
-Start the companion, then start/restart Thunderbird so the extension connects.
-Use `GET /health` for liveness and authenticated `GET /operator/status` to check
-whether the extension is polling. Neither endpoint reports message contents.
+Never commit the generated XPI or configuration. Install using Thunderbird's
+add-on manager or a local enterprise `ExtensionSettings` policy, preserving
+existing policies. The extension persists its write ledger in the Thunderbird
+profile; retain that profile across updates. Recreate the companion whenever the
+Thunderbird container is recreated so its shared network namespace stays valid.
+Thunderbird host permission patterns omit ports; transport stays fixed to
+`http://127.0.0.1:8787`.
 
-## Read-only verification
+In Inbox Zero configure `THUNDERBIRD_BRIDGE_URL`, `THUNDERBIRD_BRIDGE_TOKEN` (the
+operator token), and `THUNDERBIRD_BRIDGE_OWNER_EMAIL` (the authorized Inbox Zero
+user's login email, which may differ from the mailbox email). The owner can select
+**Connect Thunderbird** on Accounts. The server obtains the mailbox identity
+from the fixed native account and rejects account ownership conflicts. No browser
+receives bridge credentials. Apply the database migrations before deployment.
 
-Operator requests use `Authorization: Bearer OPERATOR_TOKEN`:
+## Protocol and recovery
 
-- `POST /operator/commands` with `{"type":"readAccount"}` verifies the selected
-  account and its Inbox.
-- `{"type":"listInbox","maxResults":25}` reads a bounded page of message headers.
-- `{"type":"getMessage","messageId":123}` reads one message from the selected
-  account. The extension verifies ownership before fetching its body.
+`GET /health` reports liveness. Authenticated `GET /operator/status` reports poll
+status. Operator commands use `POST /operator/commands`, with one outstanding
+native command, up to four queued callers, and a 30 second total deadline. Reads include `readAccount`, `listFolders`,
+`listMessages` (up to 25 headers per page), and `getMessage`.
 
-All commands have deadlines; only one may be outstanding. Results are transient,
-not stored by the companion. Read errors are sanitized. Missing or mismatched
-account scope fails closed. Thunderbird's integer message IDs are ephemeral and
-must not serve as durable idempotency keys for a future action integration.
+Pagination continuations are scoped to account, folder, query, and page size,
+expire after two minutes, and are single use. Restarted or expired scans resume
+from the beginning; persisted message identities prevent duplicate automation.
+Existing cached headers do not prove Thunderbird has fetched every cloud message.
 
-The extension uses the documented [message API](https://webextension-api.thunderbird.net/en/esr-mv2/messages.html)
-and aborts unused list continuations. It does not verify delivery of new server
-messages merely by returning existing cached headers; verify a live read before
-claiming school synchronization is working.
+Writes require an `operationId`. Message mutations additionally require an RFC
+Message-ID, date, and subject anchor. Recycled native integer IDs cannot authorize
+another message; moved or restarted IDs resolve only to a unique scoped match.
+The extension records intent before invoking a native write and completion before
+acknowledging it. Repeating a completed operation returns its recorded result.
+Interrupted operations return `WRITE_UNKNOWN` and require review, never automatic
+replay. The ledger stops writes at 20,000 operations rather than forgetting
+idempotency history. Back up the profile; clearing ledger storage loses this guard.
 
-Run companion and reader tests with Node 24:
+The polling worker processes new Inbox messages using existing Inbox Zero rules.
+Classifications map to folders; native draft saves remain unsent. Claimed work
+from an interrupted worker is marked for review. Unsupported search syntax or
+operations fail explicitly instead of returning misleading empty results.
+
+References: Thunderbird [messages](https://webextension-api.thunderbird.net/en/esr-mv2/messages.html),
+[compose](https://webextension-api.thunderbird.net/en/esr-mv2/compose.html),
+[folders](https://webextension-api.thunderbird.net/en/esr-mv2/folders.html), and
+[enterprise policies](https://thunderbird.github.io/policy-templates/).
 
 ```sh
-node --test docker/thunderbird-bridge/server.test.mjs docker/thunderbird-bridge/extension/reader.test.mjs docker/thunderbird-bridge/extension/bounded-read.test.mjs
+node --test docker/thunderbird-bridge/server.test.mjs docker/thunderbird-bridge/extension/*.test.mjs
 ```

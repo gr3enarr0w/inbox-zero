@@ -15,3 +15,9 @@ export function isSmarterMailProvider(
 ): provider is "smartermail" {
   return provider === "smartermail";
 }
+
+export function isThunderbirdProvider(
+  provider: string | null | undefined,
+): provider is "thunderbird" {
+  return provider === "thunderbird";
+}

@@ -80,6 +80,7 @@ import {
   isGoogleProvider,
   isMicrosoftProvider,
   isSmarterMailProvider,
+  isThunderbirdProvider,
 } from "@/utils/email/provider-types";
 import { getOpenInMailboxLabel } from "@/utils/url";
 import { useEmailLabels } from "@/providers/EmailLabelsProvider";
@@ -1382,7 +1383,9 @@ export function MailShell() {
                 searchVariant={getMailSearchVariant({
                   isAllAccounts,
                   isOutlook: isMicrosoftProvider(provider),
-                  isNative: isSmarterMailProvider(provider),
+                  isNative:
+                    isSmarterMailProvider(provider) ||
+                    isThunderbirdProvider(provider),
                 })}
                 onToggleLayout={toggleLayout}
                 expandedPreview={expandedPreview}

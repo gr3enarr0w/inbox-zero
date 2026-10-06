@@ -14,10 +14,11 @@ import { isGoogleProvider } from "@/utils/email/provider-types";
  * message is safe to show to the user.
  */
 export async function getAccountLinkingUrl(
-  provider: "google" | "microsoft" | "smartermail",
+  provider: "google" | "microsoft" | "smartermail" | "thunderbird",
   options?: { reconnectEmailAccountId?: string },
 ): Promise<string> {
-  if (provider === "smartermail") return "/accounts";
+  if (provider === "smartermail" || provider === "thunderbird")
+    return "/accounts";
   const apiProvider = provider === "microsoft" ? "outlook" : "google";
   const query = options?.reconnectEmailAccountId
     ? `?emailAccountId=${encodeURIComponent(options.reconnectEmailAccountId)}`

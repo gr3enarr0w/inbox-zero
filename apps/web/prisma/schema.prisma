@@ -18,6 +18,7 @@ model Account {
   userId                String
   provider              String
   smarterMailBaseUrl    String?
+  thunderbirdAccountId   String?
   type                  String        @default("oidc") // next-auth deprecated field
   providerAccountId     String
   refresh_token         String?       @db.Text
@@ -146,6 +147,8 @@ model EmailAccount {
   smarterMailMailboxSessions SmarterMailMailboxSession[]
   smarterMailSyncState SmarterMailSyncState?
   smarterMailSyncMessages SmarterMailSyncMessage[]
+  thunderbirdSyncState ThunderbirdSyncState?
+  thunderbirdSyncMessages ThunderbirdSyncMessage[]
   id        String   @id @default(cuid())
   email     String   @unique
   createdAt DateTime @default(now())
@@ -2769,6 +2772,32 @@ model ScimIdentityLink {
 
   @@unique([connectionId, externalId])
   @@index([userId])
+}
+
+model ThunderbirdSyncState {
+  emailAccountId String @id
+  emailAccount EmailAccount @relation(fields: [emailAccountId], references: [id], onDelete: Cascade)
+  enabled Boolean @default(false)
+  cursor String?
+  failures Int @default(0)
+  nextRunAt DateTime @default(now())
+  leaseUntil DateTime?
+  leaseToken String?
+  lastSyncedAt DateTime?
+  updatedAt DateTime @updatedAt
+  @@index([enabled, nextRunAt])
+}
+
+model ThunderbirdSyncMessage {
+  emailAccountId String
+  emailAccount EmailAccount @relation(fields: [emailAccountId], references: [id], onDelete: Cascade)
+  messageKey String
+  messageId String
+  status String @default("queued")
+  createdAt DateTime @default(now())
+  processedAt DateTime?
+  @@id([emailAccountId, messageKey])
+  @@index([emailAccountId, status])
 }
 
 model SmarterMailSyncState {

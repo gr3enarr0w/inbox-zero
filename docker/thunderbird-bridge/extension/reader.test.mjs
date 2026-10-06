@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test, mock } from "node:test";
+import "./protocol.js";
 import "./reader.js";
 
 const { readCommand, errorCode } = globalThis.InboxZeroThunderbirdReader;
@@ -22,11 +23,11 @@ function fixture() {
   };
 }
 
-test("account readiness returns no identity emails", async () => {
+test("account readiness returns scoped enrollment identity", async () => {
   const api = fixture();
   const result = await readCommand(api, { ...base, type: "readAccount" });
-  assert.deepEqual(result, { accountId, account: { id: accountId, ready: true, inboxFound: true } });
-  assert.equal(JSON.stringify(result).includes("private@example.com"), false);
+  assert.deepEqual(result, { accountId, account: { id: accountId, email: "private@example.com", ready: true, inboxFound: true } });
+  assert.equal(result.account.email, "private@example.com");
   assert.equal(api.messages.getFull.mock.callCount(), 0);
 });
 
@@ -104,4 +105,73 @@ test("native RFC message wrappers expose the main body without importing attache
   ] }));
   const result = await readCommand(api, { ...base, type: "getMessage", messageId: 1 });
   assert.equal(result.message.textPlain, "Primary message");
+});
+
+test("recycled native IDs cannot modify another message and foreign destinations are rejected", async () => {
+  const api = fixture();
+  api.messages.move = mock.fn(async () => undefined);
+  api.folders.get = mock.fn(async () => ({id:'foreign',accountId:'other'}));
+  const identity = {headerMessageId:header().headerMessageId,date:header().date.toISOString(),subject:header().subject};
+  await assert.rejects(readCommand(api,{...base,type:'moveMessage',operationId:'0123456789abcdef',messageId:1,identity,destinationFolderId:'foreign'}),{message:'OUT_OF_SCOPE'});
+  assert.equal(api.messages.move.mock.callCount(),0);
+  api.messages.get = mock.fn(async () => ({...header(),headerMessageId:'different'}));
+  await assert.rejects(readCommand(api,{...base,type:'moveMessage',operationId:'0123456789abcdef',messageId:1,identity,destinationFolderId:'foreign'}),{message:'MESSAGE_NOT_FOUND'});
+  assert.equal(api.messages.move.mock.callCount(),0);
+});
+
+test("pagination tokens are bound to the exact account, folder and query", async () => {
+  const api = fixture();
+  api.folders.get = mock.fn(async () => folder);
+  api.messages.continueList = mock.fn(async () => ({messages:[header(2)]}));
+  api.messages.query = mock.fn(async () => ({id:'native-page',messages:[header()]}));
+  const first = await readCommand(api,{...base,type:'listMessages',folderId:folder.id,maxResults:1});
+  await assert.rejects(readCommand(api,{...base,type:'listMessages',folderId:folder.id,maxResults:1,query:{read:true},pageToken:first.nextPageToken}),{message:'STALE_PAGE'});
+  assert.equal(api.messages.continueList.mock.callCount(),0);
+  const next = await readCommand(api,{...base,type:'listMessages',folderId:folder.id,maxResults:1,pageToken:first.nextPageToken});
+  assert.equal(next.messages[0].id,2);
+  await assert.rejects(readCommand(api,{...base,type:'listMessages',folderId:folder.id,maxResults:1,pageToken:first.nextPageToken}),{message:'STALE_PAGE'});
+});
+
+test('draft saving requires explicit account and identity enrollment before composing', async () => {
+  const api = fixture();
+  api.accounts.get = mock.fn(async () => ({id: accountId, identities: [{id: 'identity1',email:'reader@example.com'}]}));
+  api.compose = {beginNew: mock.fn(async () => ({id: 1}))};
+  const command = {...base,type:'createDraft',operationId:'0123456789abcdef',to:['recipient@example.com'],subject:'Draft',textPlain:'Body'};
+  for (const options of [{},{draftsAccountId:'other',draftsIdentityId:'identity1'},{draftsAccountId:accountId,draftsIdentityId:'foreign'}])
+    await assert.rejects(readCommand(api,command,options),{message:'OUT_OF_SCOPE'});
+  assert.equal(api.compose.beginNew.mock.callCount(),0);
+});
+
+test('enrolled draft saving preflights owned Drafts and clears FCC copies', async () => {
+  const api = fixture();
+  const drafts = {id:'drafts1',accountId};
+  api.accounts.get = mock.fn(async () => ({id:accountId,identities:[{id:'identity1'}]}));
+  api.folders.query = mock.fn(async () => [drafts]);
+  api.compose = {
+    beginNew: mock.fn(async () => ({id:7})),
+    saveMessage: mock.fn(async () => ({messages:[{...header(),folder:drafts}]})),
+  };
+  api.tabs = {remove: mock.fn(async () => undefined)};
+  const command = {...base,type:'createDraft',operationId:'0123456789abcdef',to:['recipient@example.com'],subject:'Draft',textPlain:'Body'};
+  const options = {draftsAccountId:accountId,draftsIdentityId:'identity1'};
+  const result = await readCommand(api,command,options);
+  assert.equal(result.message.folderId,'drafts1');
+  assert.deepEqual(api.folders.query.mock.calls[0].arguments,[{accountId,specialUse:['drafts']}]);
+  assert.deepEqual(api.compose.beginNew.mock.calls[0].arguments,[{
+    identityId:'identity1',to:command.to,subject:'Draft',plainTextBody:'Body',isPlainText:true,
+    overrideDefaultFcc:true,overrideDefaultFccFolder:'',additionalFccFolder:'',
+  }]);
+  assert.equal(api.tabs.remove.mock.callCount(),1);
+  api.compose.saveMessage = mock.fn(async () => ({messages:[{...header(),folder:drafts},{...header(2),folder:{id:'other',accountId:'foreign'}}]}));
+  await assert.rejects(readCommand(api,command,options),{message:'OUT_OF_SCOPE'});
+});
+
+test('drafts fail before native composition if the owned server Drafts folder is missing', async () => {
+  const api = fixture();
+  api.accounts.get = mock.fn(async () => ({id:accountId,identities:[{id:'identity1'}]}));
+  api.folders.query = mock.fn(async () => []);
+  api.compose = {beginNew:mock.fn(async () => ({id:1}))};
+  const command = {...base,type:'createDraft',operationId:'0123456789abcdef',to:['recipient@example.com'],subject:'Draft',textPlain:'Body'};
+  await assert.rejects(readCommand(api,command,{draftsAccountId:accountId,draftsIdentityId:'identity1'}),{message:'OUT_OF_SCOPE'});
+  assert.equal(api.compose.beginNew.mock.callCount(),0);
 });

@@ -18,7 +18,7 @@ export type TabMailMessage =
   | {
       type: "hello";
       accountId: string;
-      provider?: "google" | "microsoft" | "smartermail";
+      provider?: "google" | "microsoft" | "smartermail" | "thunderbird";
     }
   | { type: "ready" }
   | { type: "owner"; accountId: string }
@@ -66,7 +66,7 @@ export function bindTabMailOwner(input: {
   bus: TabMailBus;
   ensureAccount?: (input: {
     accountId: string;
-    provider: "google" | "microsoft" | "smartermail";
+    provider: "google" | "microsoft" | "smartermail" | "thunderbird";
   }) => Promise<void>;
 }): () => void {
   const handles = new Map<
@@ -164,7 +164,7 @@ export function disposeTabFollowerClient(client: MailClient) {
 
 export function createTabFollowerClient(input: {
   accountId: string;
-  provider?: "google" | "microsoft" | "smartermail";
+  provider?: "google" | "microsoft" | "smartermail" | "thunderbird";
   bus: TabMailBus;
 }): MailClient {
   const pending = new Map<
@@ -390,7 +390,7 @@ function announceOwner(
     bus: TabMailBus;
     ensureAccount?: (account: {
       accountId: string;
-      provider: "google" | "microsoft" | "smartermail";
+      provider: "google" | "microsoft" | "smartermail" | "thunderbird";
     }) => Promise<void>;
   },
   message: Extract<TabMailMessage, { type: "hello" }>,

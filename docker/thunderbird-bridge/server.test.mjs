@@ -5,12 +5,12 @@ import { createBridgeServer } from "./server.mjs";
 const bridgeToken = "b".repeat(64), operatorToken = "o".repeat(64), accountId = "fixture-account";
 test("health is minimal and credentials cannot cross role boundaries", async t => {
   const api = await fixture(t);
-  assert.deepEqual(await (await api("/health")).json(), { ok: true, readOnlyStaging: true });
+  assert.deepEqual(await (await api("/health")).json(), { ok: true, readOnlyStaging: false });
   assert.equal((await api("/operator/status")).status, 401);
   assert.equal((await api("/operator/status", undefined, bridgeToken)).status, 401);
   assert.equal((await api("/bridge/commands", undefined, operatorToken)).status, 401);
   const status = await (await api("/operator/status", undefined, operatorToken)).json();
-  assert.deepEqual(status, { readOnlyStaging: true, accountBound: true, bridgeConnected: false, pending: false, completed: 0 });
+  assert.deepEqual(status, { readOnlyStaging: false, accountBound: true, bridgeConnected: false, pending: false, completed: 0 });
 });
 test("only explicitly allowed reads and bounds can be queued", async t => {
   const api = await fixture(t);
@@ -50,13 +50,14 @@ test("account and message reads validate the returned identity", async t => {
     assert.deepEqual(await (await result).json(), { result: value });
   }
 });
-test("one pending command expires and bridge errors cannot disclose arbitrary text", async t => {
+test("queued commands expire and bridge errors cannot disclose arbitrary text", async t => {
   const api = await fixture(t, { commandMs: 250 });
   const first = api("/operator/commands", { type: "readAccount" }, operatorToken);
   const command = await (await api("/bridge/commands", undefined, bridgeToken)).json();
-  assert.equal((await api("/operator/commands", { type: "readAccount" }, operatorToken)).status, 409);
+  const queued = api("/operator/commands", { type: "readAccount" }, operatorToken);
   assert.equal((await api("/bridge/results", { nonce: command.nonce, error: "private content" }, bridgeToken)).status, 400);
   assert.equal((await first).status, 504);
+  assert.equal((await queued).status,504);
   const second = api("/operator/commands", { type: "readAccount" }, operatorToken);
   const next = await (await api("/bridge/commands", undefined, bridgeToken)).json();
   await api("/bridge/results", { nonce: next.nonce, error: "READ_FAILED" }, bridgeToken);

@@ -93,15 +93,8 @@ describe("SmarterMail owned folder pagination", () => {
     expect(request).not.toHaveBeenCalled();
   });
 
-  it("rejects oversized inventories, oversized responses and foreign-folder rows", async () => {
+  it("rejects oversized responses and foreign-folder rows", async () => {
     const { request, options } = fixture();
-    await expect(
-      fetchSmarterMailFolderPage({
-        ...options,
-        folders: Array.from({ length: 21 }, (_, i) => String(i)),
-      }),
-    ).rejects.toThrow("20 owned");
-    expect(request).not.toHaveBeenCalled();
     request.mockResolvedValueOnce({ results: [{ uid: 1, folder: "Other" }] });
     await expect(fetchSmarterMailFolderPage(options)).rejects.toThrow(
       "folder scope",
@@ -112,6 +105,38 @@ describe("SmarterMail owned folder pagination", () => {
     await expect(fetchSmarterMailFolderPage(options)).rejects.toThrow(
       "page size",
     );
+  });
+  it("resumes bounded pages across a large inventory even when earlier folders are empty", async () => {
+    const { request, options } = fixture();
+    const folders = Array.from(
+      { length: 45 },
+      (_, index) => `Folder${String(index).padStart(2, "0")}`,
+    );
+    request.mockImplementation(async (_operation, body) => ({
+      results: body.folder === "Folder44" ? [{ uid: 55 }] : [],
+    }));
+    let page = await fetchSmarterMailFolderPage({ ...options, folders });
+    expect(page.results).toEqual([]);
+    expect(page.nextPageToken).toBeDefined();
+    expect(request).toHaveBeenCalledTimes(20);
+    request.mockClear();
+    page = await fetchSmarterMailFolderPage({
+      ...options,
+      folders,
+      pageToken: page.nextPageToken,
+    });
+    expect(page.results).toEqual([]);
+    expect(page.nextPageToken).toBeDefined();
+    expect(request).toHaveBeenCalledTimes(20);
+    request.mockClear();
+    page = await fetchSmarterMailFolderPage({
+      ...options,
+      folders,
+      pageToken: page.nextPageToken,
+    });
+    expect(page.results).toEqual([{ uid: 55, folder: "Folder44" }]);
+    expect(page.nextPageToken).toBeUndefined();
+    expect(request).toHaveBeenCalledTimes(5);
   });
 
   it("stops before another folder query when cancellation arrives", async () => {
