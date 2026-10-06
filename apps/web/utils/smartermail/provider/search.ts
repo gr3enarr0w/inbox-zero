@@ -43,8 +43,10 @@ export class SmarterMailSearchProvider extends SmarterMailThreadsProvider {
       after?: Date;
       before?: Date;
       headerReference?: string;
+      signal?: AbortSignal;
     },
   ) {
+    options.signal?.throwIfAborted();
     if (
       options.mailboxSearch?.text ||
       options.mailboxSearch?.excludedRoles?.length
@@ -167,11 +169,14 @@ export class SmarterMailSearchProvider extends SmarterMailThreadsProvider {
           body,
           take,
           pageToken: options.pageToken,
+          signal: options.signal,
         });
+    options.signal?.throwIfAborted();
     if (result.results.length > take)
       throw new Error("SmarterMail returned more than the requested page size");
     const messages: ParsedMessage[] = [];
     for (const row of result.results) {
+      options.signal?.throwIfAborted();
       const rowFolder =
         searchFolder ??
         (typeof row.folder === "string" ? row.folder : undefined);

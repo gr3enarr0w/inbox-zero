@@ -114,6 +114,30 @@ describe("SmarterMail owned folder pagination", () => {
     );
   });
 
+  it("stops before another folder query when cancellation arrives", async () => {
+    const { request, options } = fixture();
+    const controller = new AbortController();
+    request.mockImplementationOnce(async () => {
+      controller.abort();
+      return { results: [] };
+    });
+    await expect(
+      fetchSmarterMailFolderPage({ ...options, signal: controller.signal }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(request).toHaveBeenCalledOnce();
+  });
+
+  it("uses the requested scope when a scoped search omits its folder field", async () => {
+    const { request, options } = fixture();
+    request.mockResolvedValueOnce({ results: [{ uid: 7 }] });
+    const page = await fetchSmarterMailFolderPage({
+      ...options,
+      folders: ["Sent Items"],
+    });
+    expect(page.results).toEqual([{ uid: 7, folder: "Sent Items" }]);
+    expect(page.nextPageToken).toBeUndefined();
+  });
+
   it("skips empty folders and terminates without a misleading short intermediate page", async () => {
     const { request, options } = fixture();
     request

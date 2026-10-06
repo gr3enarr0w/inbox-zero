@@ -36,6 +36,7 @@ export class SmarterMailConversationsProvider extends SmarterMailSendersProvider
         headerReference: rootReference,
         maxResults: 25,
         includeSpamTrash: true,
+        signal: options?.signal,
       });
       options?.signal?.throwIfAborted();
       if (options?.complete && result.nextPageToken)

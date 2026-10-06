@@ -132,6 +132,32 @@ describe("SmarterMail scoped search", () => {
     expect(page.messages).toEqual([]);
     expect(page.nextPageToken).toBe("1");
   });
+  it("stops starting detail reads when retrieval is canceled", async () => {
+    const { provider, request } = setup();
+    const controller = new AbortController();
+    request
+      .mockResolvedValueOnce({ results: [{ uid: 1 }, { uid: 2 }] })
+      .mockImplementationOnce(async () => {
+        controller.abort();
+        return {
+          messageData: {
+            uid: 1,
+            folder: "Inbox",
+            date: "2026-10-06T12:00:00Z",
+          },
+        };
+      });
+    await expect(
+      provider.searchMessages({
+        query: "",
+        folderId: "Inbox",
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow();
+    expect(
+      request.mock.calls.filter(([operation]) => operation === "message"),
+    ).toHaveLength(1);
+  });
   it("finds nested owned folders while excluding shared mailbox scope", async () => {
     const { provider, request } = setup();
     request.mockResolvedValue({

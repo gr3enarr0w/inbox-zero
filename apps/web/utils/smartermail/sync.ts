@@ -11,6 +11,7 @@ import { getWebhookEmailAccount } from "@/utils/webhook/validate-webhook-account
 import { getUserTier, hasAiAccess } from "@/utils/premium";
 import type { Logger } from "@/utils/logger";
 import type { ParsedMessage } from "@/utils/types";
+import { SmarterMailMessageNotFoundError } from "@/utils/smartermail/errors";
 
 const PAGE_SIZE = 25;
 const LEASE_MS = 10 * 60 * 1000;
@@ -153,12 +154,14 @@ export async function syncSmarterMailAccount(
       if (!renewed.count) return { skipped: true };
       let message: ParsedMessage | null = null;
       let failureStatus = "skipped";
+      let confirmedAbsent = false;
       try {
         const { folder } = parseSmarterMailMessageId(pending.messageId);
         failureStatus = "retry_ready";
         const present =
           (await provider.hasMessagesInFolder(folder, [pending.messageId]))
             .length > 0;
+        confirmedAbsent = !present;
         message = present ? await provider.getMessage(pending.messageId) : null;
         if (
           message &&
@@ -166,11 +169,16 @@ export async function syncSmarterMailAccount(
         )
           message = null;
         failureStatus = "skipped";
-      } catch {
+      } catch (error) {
         // These reads precede claiming the message or starting any rule actions.
+        if (error instanceof SmarterMailMessageNotFoundError) {
+          confirmedAbsent = true;
+          failureStatus = "skipped";
+        }
         message = null;
       }
       if (!message) {
+        if (confirmedAbsent) departures++;
         await prisma.smarterMailSyncMessage.updateMany({
           where: {
             emailAccountId,

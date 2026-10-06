@@ -17,6 +17,7 @@ export async function fetchSmarterMailFolderPage({
   take,
   pageToken,
   scope,
+  signal,
 }: {
   client: Pick<SmarterMailClient, "request">;
   folders: string[];
@@ -24,7 +25,9 @@ export async function fetchSmarterMailFolderPage({
   take: number;
   pageToken?: string;
   scope: string;
+  signal?: AbortSignal;
 }) {
+  signal?.throwIfAborted();
   if (!Number.isInteger(take) || take < 1 || take > 25)
     throw new Error("SmarterMail page size must be between 1 and 25");
   if (!scope || folders.some((folder) => !folder))
@@ -57,6 +60,7 @@ export async function fetchSmarterMailFolderPage({
     z.infer<typeof listingSchema>["results"][number] & { folder: string }
   > = [];
   while (index < inventory.length && results.length < take) {
+    signal?.throwIfAborted();
     const folder = inventory[index]!;
     const remaining = take - results.length;
     const page = listingSchema.parse(
@@ -71,7 +75,7 @@ export async function fetchSmarterMailFolderPage({
     if (page.results.length > remaining)
       throw new Error("SmarterMail returned more than the requested page size");
     for (const row of page.results) {
-      if (row.folder !== folder)
+      if (row.folder !== undefined && row.folder !== folder)
         throw new Error("SmarterMail search result folder scope mismatch");
       results.push({ ...row, folder });
     }

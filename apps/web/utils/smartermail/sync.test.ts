@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import prisma from "@/utils/__mocks__/prisma";
 import { createScopedLogger } from "@/utils/logger";
 import { smarterMailMessageId } from "./message";
+import { SmarterMailMessageNotFoundError } from "./errors";
 import type { ParsedMessage } from "@/utils/types";
 import { runRules } from "@/utils/ai/choose-rule/run-rules";
 import { createEmailProvider } from "@/utils/email/provider";
@@ -353,6 +354,50 @@ describe("SmarterMail polling", () => {
     expect(prisma.smarterMailSyncState.updateMany).toHaveBeenLastCalledWith(
       expect.objectContaining({
         data: expect.not.objectContaining({ cursor: expect.anything() }),
+      }),
+    );
+  });
+  it.each([
+    "absent",
+    "read-race",
+    "unknown",
+    "identity",
+  ])("rebases only confirmed absence for a skipped %s queued reference", async (outcome) => {
+    const hasMessagesInFolder = vi.fn().mockResolvedValue([message.id]);
+    const getMessage = vi.fn().mockResolvedValue(message);
+    if (outcome === "absent") hasMessagesInFolder.mockResolvedValue([]);
+    if (outcome === "read-race")
+      getMessage.mockRejectedValue(new SmarterMailMessageNotFoundError());
+    if (outcome === "unknown")
+      getMessage.mockRejectedValue(new Error("normalization failed"));
+    if (outcome === "identity")
+      getMessage.mockResolvedValue({
+        ...message,
+        headers: {
+          ...message.headers,
+          "message-id": "<different@example.com>",
+        },
+      });
+    vi.mocked(createEmailProvider).mockResolvedValue({
+      getMessagesWithPagination: list,
+      hasMessagesInFolder,
+      getMessage,
+    } as never);
+    await syncSmarterMailAccount("account", logger);
+    expect(runRules).not.toHaveBeenCalled();
+    const absent = outcome === "absent" || outcome === "read-race";
+    expect(prisma.smarterMailSyncState.updateMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          cursor: absent ? "scan:24" : "scan:25",
+        }),
+      }),
+    );
+    expect(prisma.smarterMailSyncMessage.updateMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: outcome === "unknown" ? "retry_ready" : "skipped",
+        }),
       }),
     );
   });
