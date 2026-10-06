@@ -79,6 +79,7 @@ export type MailboxItemColorOption = EmailLabelColor & { name: string };
 
 export function MailboxItemContextMenu({
   children,
+  disabled = false,
   item,
   typeName,
   editMode,
@@ -89,6 +90,7 @@ export function MailboxItemContextMenu({
   onDelete,
 }: {
   children: ReactNode;
+  disabled?: boolean;
   item: MailboxItem;
   typeName: string;
   editMode: "name" | "color" | "name-and-color";
@@ -108,6 +110,7 @@ export function MailboxItemContextMenu({
   const [isDeleting, setIsDeleting] = useState(false);
   const [name, setName] = useState(item.name);
   const [color, setColor] = useState<EmailLabelColor | null>(null);
+  if (disabled) return <>{children}</>;
   const showsName = editMode !== "color";
   const showsColor = editMode !== "name";
 

@@ -15,6 +15,7 @@ import {
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { useLabels } from "@/hooks/useLabels";
 import { useAccount } from "@/providers/EmailAccountProvider";
+import { getEmailProviderCapabilities } from "@/utils/email/capabilities";
 import { createLabelAction } from "@/utils/actions/mail";
 import { getActionErrorMessage } from "@/utils/error";
 import { useOptionalMailClient } from "@inboxzero/mail-react/MailEngineProvider";
@@ -40,7 +41,9 @@ export function LabelPickerDialog({
   onApplied: (threadIds: string[], labelId: string) => void;
   mode?: "label" | "move";
 }) {
-  const { emailAccountId } = useAccount();
+  const { emailAccountId, provider } = useAccount();
+  const supportsCategoryEditing =
+    getEmailProviderCapabilities(provider).categoryEditing;
   const client = useOptionalMailClient();
   const { userLabels, isLoading, error, mutate } = useLabels(emailAccountId);
   const [search, setSearch] = useState("");
@@ -65,6 +68,7 @@ export function LabelPickerDialog({
     [userLabels],
   );
   const canCreate =
+    supportsCategoryEditing &&
     name.length > 0 &&
     !labels.some(
       (label) => label.displayName.toLowerCase() === name.toLowerCase(),
@@ -77,6 +81,8 @@ export function LabelPickerDialog({
     try {
       let id = labelId;
       if (!id) {
+        if (!supportsCategoryEditing)
+          throw new Error("Create this category in your mail server first.");
         if (createdLabel.current?.name === name) id = createdLabel.current.id;
         else {
           const result = await createLabelAction(emailAccountId, { name });
