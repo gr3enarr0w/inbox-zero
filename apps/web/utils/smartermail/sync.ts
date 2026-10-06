@@ -14,6 +14,7 @@ import type { ParsedMessage } from "@/utils/types";
 import { SmarterMailMessageNotFoundError } from "@/utils/smartermail/errors";
 
 const PAGE_SIZE = 25;
+const PROCESSING_BATCH_SIZE = 50;
 const LEASE_MS = 10 * 60 * 1000;
 
 export async function syncSmarterMailAccount(
@@ -113,7 +114,7 @@ export async function syncSmarterMailAccount(
     const queued = await prisma.smarterMailSyncMessage.findMany({
       where: { emailAccountId, status: "queued" },
       orderBy: [{ createdAt: "asc" }, { messageKey: "asc" }],
-      take: PAGE_SIZE,
+      take: PROCESSING_BATCH_SIZE,
     });
     const scanOffset = cursor?.startsWith("scan:")
       ? Number(cursor.slice(5))
@@ -218,10 +219,9 @@ export async function syncSmarterMailAccount(
       )
         departures++;
     }
-    const nextCursor = budgetExceeded
-      ? recoveryCursor
-      : scanOffset === null
-        ? queued.length === PAGE_SIZE
+    const nextCursor =
+      scanOffset === null
+        ? budgetExceeded || queued.length === PROCESSING_BATCH_SIZE
           ? "process"
           : null
         : `scan:${Math.max(0, scanOffset - departures)}`;
@@ -229,7 +229,7 @@ export async function syncSmarterMailAccount(
       cursor: nextCursor,
       failures: 0,
       lastSyncedAt: new Date(),
-      nextRunAt: new Date(Date.now() + 60_000),
+      nextRunAt: new Date(Date.now() + (nextCursor === null ? 60_000 : 0)),
     });
     return {
       processed,

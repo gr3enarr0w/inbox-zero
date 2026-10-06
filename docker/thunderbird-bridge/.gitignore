@@ -1,0 +1,3 @@
+secrets/
+*.xpi
+extension/config.json

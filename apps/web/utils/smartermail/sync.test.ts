@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import prisma from "@/utils/__mocks__/prisma";
 import { createScopedLogger } from "@/utils/logger";
 import { smarterMailMessageId } from "./message";
@@ -24,6 +24,7 @@ vi.mock("@/utils/premium", () => ({
 
 const logger = createScopedLogger("smartermail-sync-test");
 const list = vi.fn();
+afterEach(() => vi.restoreAllMocks());
 const message: ParsedMessage = {
   id: smarterMailMessageId("Inbox", 1),
   threadId: "Inbox:1",
@@ -83,6 +84,29 @@ describe("SmarterMail polling", () => {
     });
     expect(list).not.toHaveBeenCalled();
   });
+  it.each([
+    "backlog",
+    "idle",
+  ])("schedules a successful %s batch without delaying pending work", async (kind) => {
+    const now = Date.now();
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    list.mockResolvedValue({
+      messages: [],
+      nextPageToken: kind === "backlog" ? "25" : undefined,
+    });
+    prisma.smarterMailSyncMessage.findMany.mockResolvedValue([]);
+    const result = await syncSmarterMailAccount("account", logger);
+    expect(result).toMatchObject({ hasMore: kind === "backlog" });
+    expect(prisma.smarterMailSyncState.updateMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          nextRunAt: new Date(now + (kind === "backlog" ? 0 : 60_000)),
+          failures: 0,
+          leaseToken: null,
+        }),
+      }),
+    );
+  });
 
   it("deduplicates replayed queue deliveries without repeating actions", async () => {
     list.mockResolvedValueOnce({ messages: [message] });
@@ -91,7 +115,84 @@ describe("SmarterMail polling", () => {
     expect(result).toMatchObject({ processed: 0, hasMore: false });
     expect(runRules).not.toHaveBeenCalled();
   });
+  it.each([
+    "full",
+    "deadline",
+  ])("bounds a larger processing batch by its %s limit", async (limit) => {
+    let clock = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => clock);
+    const messages = Array.from({ length: 70 }, (_, index) => ({
+      ...message,
+      id: smarterMailMessageId("Inbox", index + 1),
+      headers: {
+        ...message.headers,
+        "message-id": `<${index + 1}@example.com>`,
+      },
+    }));
+    prisma.smarterMailSyncState.findUniqueOrThrow.mockResolvedValue({
+      cursor: "process",
+      failures: 0,
+    } as never);
+    prisma.smarterMailSyncMessage.findMany.mockImplementation(
+      async ({ take }) =>
+        messages.slice(0, take).map((row) => ({
+          messageId: row.id,
+          messageKey: getSmarterMailSyncMessageKey(row),
+        })) as never,
+    );
+    vi.mocked(createEmailProvider).mockResolvedValue({
+      getMessage: async (id: string) => messages.find((row) => row.id === id),
+      hasMessagesInFolder: async (_folder: string, ids: string[]) => ids,
+    } as never);
+    vi.mocked(runRules).mockImplementation(async () => {
+      if (limit === "deadline") clock += 241_000;
+      return [];
+    });
+    const result = await syncSmarterMailAccount("account", logger);
+    expect(result).toMatchObject({
+      processed: limit === "full" ? 50 : 1,
+      hasMore: true,
+    });
+    expect(runRules).toHaveBeenCalledTimes(limit === "full" ? 50 : 1);
+    expect(list).not.toHaveBeenCalled();
+    expect(prisma.smarterMailSyncState.updateMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          cursor: "process",
+          nextRunAt: new Date(clock),
+          leaseToken: null,
+        }),
+      }),
+    );
+  });
 
+  it("advances discovery after a clean timed stop instead of applying the crash rewind", async () => {
+    let clock = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => clock);
+    prisma.smarterMailSyncMessage.findMany.mockResolvedValue(
+      Array.from({ length: 50 }, () => ({
+        messageId: message.id,
+        messageKey: getSmarterMailSyncMessageKey(message),
+      })) as never,
+    );
+    vi.mocked(runRules).mockImplementation(async () => {
+      clock += 241_000;
+      return [];
+    });
+    const result = await syncSmarterMailAccount("account", logger);
+    expect(result).toMatchObject({ processed: 1, hasMore: true });
+    expect(prisma.smarterMailSyncState.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { cursor: "scan:0" } }),
+    );
+    expect(prisma.smarterMailSyncState.updateMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          cursor: "scan:25",
+          nextRunAt: new Date(clock),
+        }),
+      }),
+    );
+  });
   it("quarantines ambiguous action errors and still saves the page checkpoint", async () => {
     list.mockResolvedValueOnce({ messages: [message] });
     vi.mocked(runRules).mockRejectedValueOnce(
