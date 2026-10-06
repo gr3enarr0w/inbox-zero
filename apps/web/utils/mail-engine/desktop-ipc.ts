@@ -16,7 +16,7 @@ export function hasDesktopMailEngineIpc() {
 }
 
 export function createDesktopIpcMailClient(input?: {
-  provider?: "google" | "microsoft";
+  provider?: "google" | "microsoft" | "smartermail";
 }) {
   const desktop = getInboxZeroDesktopApp();
   const invoke = desktop?.mailEngine;
