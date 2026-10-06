@@ -80,12 +80,25 @@
     if (!identity) throw new ReaderError(header ? "OUT_OF_SCOPE" : "MESSAGE_NOT_FOUND");
     const folders = await api.folders.query({accountId: command.accountId});
     const ids = folders.filter(f => !f.isRoot && !f.isVirtual && !f.isUnified).map(f => { assertFolder(f,command.accountId); return f.id; });
-    const page = await api.messages.query({folderId: ids, headerMessageId: identity.headerMessageId, messagesPerPage: 25});
+    let page = await api.messages.query({folderId: ids, headerMessageId: identity.headerMessageId, messagesPerPage: 25});
+    let listId = page.id;
     try {
-      const candidates = page.messages.filter(matches);
-      if (page.id || candidates.length !== 1) throw new ReaderError("MESSAGE_NOT_FOUND");
-      return candidates[0];
-    } finally { if (page.id) await api.messages.abortList(page.id); }
+      const candidates = [];
+      for (let count = 0; count < 3; count++) {
+        if (!Array.isArray(page.messages) || page.messages.length > 25) throw new ReaderError("READ_FAILED");
+        for (const message of page.messages) { assertScope(message,command.accountId); if (matches(message)) candidates.push(message); }
+        if (candidates.length > 1) throw new ReaderError("MESSAGE_NOT_FOUND");
+        if (!page.id) {
+          listId = undefined;
+          if (candidates.length !== 1) throw new ReaderError("MESSAGE_NOT_FOUND");
+          return candidates[0];
+        }
+        if (count === 2) break;
+        page = await api.messages.continueList(page.id);
+        listId = page.id ?? listId;
+      }
+      throw new ReaderError("MESSAGE_NOT_FOUND");
+    } finally { if (listId) await api.messages.abortList(listId); }
   }
   async function listMessages(api, command) {
     for (const [key,page] of pages) if (page.expires < Date.now()) { pages.delete(key); await api.messages.abortList(page.id).catch(() => undefined); }

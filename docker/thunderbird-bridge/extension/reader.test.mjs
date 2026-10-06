@@ -175,3 +175,14 @@ test('drafts fail before native composition if the owned server Drafts folder is
   await assert.rejects(readCommand(api,command,{draftsAccountId:accountId,draftsIdentityId:'identity1'}),{message:'OUT_OF_SCOPE'});
   assert.equal(api.compose.beginNew.mock.callCount(),0);
 });
+
+test('stale native identities wait for a bounded query to finish before establishing uniqueness', async () => {
+  const api = fixture();
+  api.messages.get = mock.fn(async () => {throw new Error('expired numeric ID');});
+  api.messages.query = mock.fn(async () => ({id:'pending-rfc-query',messages:[]}));
+  api.messages.continueList = mock.fn(async () => ({messages:[header(42)]}));
+  const identity = {headerMessageId:header().headerMessageId,date:header().date.toISOString(),subject:header().subject};
+  const result = await readCommand(api,{...base,type:'getMessage',messageId:1,identity});
+  assert.equal(result.message.id,42);
+  assert.equal(api.messages.continueList.mock.callCount(),1);
+});
