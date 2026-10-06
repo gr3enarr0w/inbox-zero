@@ -1,9 +1,9 @@
 import useSWR from "swr";
 import type { GetFoldersResponse } from "@/app/api/user/folders/route";
-import { isMicrosoftProvider } from "@/utils/email/provider-types";
+import { getEmailProviderCapabilities } from "@/utils/email/capabilities";
 
 export function useFolders(provider: string) {
-  const enabled = isMicrosoftProvider(provider);
+  const enabled = getEmailProviderCapabilities(provider).folders;
   const { data, error, isLoading, mutate } = useSWR<GetFoldersResponse>(
     enabled ? "/api/user/folders" : null,
   );
