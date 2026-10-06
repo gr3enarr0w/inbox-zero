@@ -132,11 +132,17 @@ describe("SmarterMail scoped search", () => {
     expect(page.messages).toEqual([]);
     expect(page.nextPageToken).toBe("1");
   });
-  it("stops starting detail reads when retrieval is canceled", async () => {
+  it.each([
+    1, 2,
+  ])("rejects cancellation during a detail read with %i result rows", async (count) => {
     const { provider, request } = setup();
     const controller = new AbortController();
     request
-      .mockResolvedValueOnce({ results: [{ uid: 1 }, { uid: 2 }] })
+      .mockResolvedValueOnce({
+        results: Array.from({ length: count }, (_, index) => ({
+          uid: index + 1,
+        })),
+      })
       .mockImplementationOnce(async () => {
         controller.abort();
         return {

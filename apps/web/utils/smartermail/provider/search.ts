@@ -195,11 +195,13 @@ export class SmarterMailSearchProvider extends SmarterMailThreadsProvider {
         ["SPAM", "TRASH"].includes(smarterMailFolderRole(rowFolder) ?? "")
       )
         continue;
+      const detail = await this.client.request("message", {
+        folder: rowFolder,
+        uid: row.uid,
+      });
+      options.signal?.throwIfAborted();
       const message = normalizeSmarterMailMessage(
-        await this.client.request("message", {
-          folder: rowFolder,
-          uid: row.uid,
-        }),
+        detail,
         rowFolder,
         row.uid,
         row,
