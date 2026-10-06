@@ -1,3 +1,4 @@
+import { LocalMailSyncPausedError } from "@/utils/email/local-mail-sync-budget";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { InvalidMailboxSyncCursorError } from "@/utils/email/mailbox-sync";
@@ -44,6 +45,16 @@ export const POST = withEmailProvider(
         }),
       );
     } catch (error) {
+      if (error instanceof LocalMailSyncPausedError)
+        return NextResponse.json(
+          { error: "Mailbox sync paused", retryAfterMs: error.retryAfterMs },
+          {
+            status: 429,
+            headers: {
+              "Retry-After": String(Math.ceil(error.retryAfterMs / 1000)),
+            },
+          },
+        );
       if (error instanceof InvalidMailboxSyncCursorError) {
         return NextResponse.json(
           { error: "Invalid mailbox sync cursor" },

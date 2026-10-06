@@ -11,6 +11,8 @@ import type { EmailProvider } from "@/utils/email/types";
 
 vi.mock("server-only", () => ({}));
 
+vi.mock("@/utils/redis", () => ({ redis: { eval: vi.fn() } }));
+
 describe("createEmailProviderMailboxSource", () => {
   it("continues provider search after the first page", async () => {
     const searchMessages = vi.fn(
