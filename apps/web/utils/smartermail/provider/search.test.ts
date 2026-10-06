@@ -86,4 +86,26 @@ describe("SmarterMail scoped search", () => {
       "Inbox/Receipts",
     ]);
   });
+  it("supports native category and starred sidebar navigation without treating them as folder roles", async () => {
+    const { provider, request } = setup();
+    request.mockResolvedValue({ results: [] });
+    await provider.getThreadsWithQuery({
+      query: { type: "label", labelId: "sm-category:Receipts" },
+    });
+    expect(request).toHaveBeenCalledWith(
+      "search",
+      expect.objectContaining({
+        folder: "",
+        categoryFilter: {
+          filteredCategories: ["Receipts"],
+          includeNoCategory: false,
+        },
+      }),
+    );
+    await provider.getThreadsWithQuery({ query: { type: "starred" } });
+    expect(request).toHaveBeenCalledWith(
+      "search",
+      expect.objectContaining({ folder: "", searchFlags: { 4: true } }),
+    );
+  });
 });

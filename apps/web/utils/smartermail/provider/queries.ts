@@ -20,30 +20,37 @@ export class SmarterMailQueriesProvider extends SmarterMailSearchProvider {
       query?.splitId
     )
       throw new SmarterMailUnsupportedError("split inbox queries");
+    const unscoped =
+      ["label", "all", "starred"].includes(query?.type ?? "") ||
+      (!query?.type && !!query?.q);
     const folderId =
       query?.folderId ??
-      (query?.type
-        ? await this.systemFolder(roleFromMailbox(query.type))
-        : await this.systemFolder("INBOX"));
+      (unscoped
+        ? undefined
+        : await this.systemFolder(roleFromMailbox(query?.type ?? "inbox")));
     if (
+      unscoped ||
       query?.fromEmail ||
       query?.labelIds?.length ||
       query?.labelId ||
       query?.category
     ) {
       const result = await this.searchMessages({
-        query: query.q ?? "",
+        query: query?.q ?? "",
+        ...(query?.type === "starred"
+          ? { mailboxSearch: { mailbox: "starred" as const } }
+          : {}),
         folderId,
-        after: query.after ?? undefined,
-        before: query.before ?? undefined,
-        readState: query.isUnread ? "unread" : undefined,
-        fromEmail: query.fromEmail ?? undefined,
+        after: query?.after ?? undefined,
+        before: query?.before ?? undefined,
+        readState: query?.isUnread ? "unread" : undefined,
+        fromEmail: query?.fromEmail ?? undefined,
         labelIds:
-          query.labelIds ??
-          (query.labelId
-            ? [query.labelId]
-            : query.category
-              ? [smarterMailCategoryId(query.category)]
+          query?.labelIds ??
+          (query?.labelId
+            ? [query?.labelId]
+            : query?.category
+              ? [smarterMailCategoryId(query?.category)]
               : undefined),
         maxResults: options.maxResults,
         pageToken: options.pageToken,

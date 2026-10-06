@@ -27,6 +27,7 @@ export function roleFromMailbox(mailbox: string) {
     inbox: "INBOX",
     sent: "SENT",
     drafts: "DRAFT",
+    draft: "DRAFT",
     spam: "SPAM",
     trash: "TRASH",
     archive: "ARCHIVE",
