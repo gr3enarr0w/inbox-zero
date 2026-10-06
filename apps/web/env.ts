@@ -89,6 +89,7 @@ const parsedEnv = createEnv({
     GOOGLE_BASE_URL: z.string().url().optional(),
     // Local Microsoft emulation only; used for both OAuth and Microsoft Graph APIs.
     MICROSOFT_BASE_URL: z.string().url().optional(),
+    SMARTERMAIL_ALLOWED_ORIGINS: z.string().optional(),
     MICROSOFT_CLIENT_ID: z.string().optional(),
     MICROSOFT_CLIENT_SECRET: z.string().optional(),
     MICROSOFT_TENANT_ID: z.preprocess(
