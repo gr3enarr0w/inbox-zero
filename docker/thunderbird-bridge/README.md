@@ -14,7 +14,7 @@ permissions, and no generic JavaScript execution endpoint.
 
 Use Thunderbird 140 ESR or later. Run one companion per user/account, sharing the
 Thunderbird container's network namespace. Its listener must stay on loopback;
-do not publish the port or add a reverse proxy. Generate two different random
+do not publish the port or add a reverse proxy. Thunderbird host-permission patterns do not support port numbers; the manifest permits loopback HTTP while the extension transport remains fixed to port 8787. Generate two different random
 bearer tokens of at least 32 bytes, store them in private files, and mount them
 read-only at the paths in `compose.example.yml`. The operator token must not be
 included in the extension.
