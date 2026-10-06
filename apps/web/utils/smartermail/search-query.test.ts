@@ -35,9 +35,22 @@ describe("SmarterMail assistant search filters", () => {
       ),
     ).toEqual({
       query: "",
-      after: new Date("2026-10-04T12:00:00Z"),
-      before: new Date("2026-10-05T12:00:00Z"),
+      after: new Date("2026-10-04T00:00:00Z"),
+      before: new Date("2026-10-05T00:00:00Z"),
     });
+  });
+  it("keeps relative filter boundaries stable while paginating within a UTC day", () => {
+    expect(
+      compileSmarterMailSearch(
+        "newer_than:2d",
+        new Date("2026-10-06T12:00:00Z"),
+      ),
+    ).toEqual(
+      compileSmarterMailSearch(
+        "newer_than:2d",
+        new Date("2026-10-06T12:01:00Z"),
+      ),
+    );
   });
   it.each([
     "in:inbox in:sent",

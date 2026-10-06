@@ -90,6 +90,7 @@ export function compileSmarterMailSearch(
         )
           throw new Error("Invalid SmarterMail relative search date");
         const date = new Date(now);
+        date.setUTCHours(0, 0, 0, 0);
         const amount = Number(match[1]);
         if (match[2] === "d") date.setUTCDate(date.getUTCDate() - amount);
         else if (match[2] === "m")
