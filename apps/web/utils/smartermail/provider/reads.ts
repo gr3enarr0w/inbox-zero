@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { smarterMailMessageId } from "@/utils/smartermail/message";
+import { SmarterMailMessageNotFoundError } from "@/utils/smartermail/errors";
 import type { EmailProvider } from "@/utils/email/types";
 import type { ParsedMessage } from "@/utils/types";
 import {
@@ -18,38 +19,36 @@ export class SmarterMailReadsProvider extends SmarterMailCategoriesProvider {
     folderId: string,
     ids: string[],
   ): Promise<string[]> {
-    if (ids.length > 100)
-      throw new Error("SmarterMail presence checks support at most 100 IDs");
+    if (ids.length > 25)
+      throw new Error("SmarterMail presence checks support at most 25 IDs");
     const references = ids.map(parseSmarterMailMessageId);
     if (references.some((reference) => reference.folder !== folderId))
       throw new Error("SmarterMail presence scope mismatch");
-    if (!references.length) return [];
-    const selectedIds = [
-      ...new Set(references.map((reference) => reference.uid)),
-    ];
-    const response = z
-      .object({
-        success: z.literal(true),
-        totalCount: z.number().int().nonnegative(),
-        results: z.array(z.number().int().positive()),
-      })
-      .parse(
-        await this.client.request("messagesUid", {
-          folder: folderId,
-          selectedIds,
-          skip: 0,
-          take: 100,
-          query: "",
-        }),
-      );
-    if (
-      response.totalCount !== response.results.length ||
-      response.results.some((uid) => !selectedIds.includes(uid))
-    )
-      throw new Error(
-        "SmarterMail returned an incomplete or unscoped presence response",
-      );
-    return response.results.map((uid) => smarterMailMessageId(folderId, uid));
+    const present: string[] = [];
+    for (const uid of new Set(references.map((reference) => reference.uid))) {
+      try {
+        const response = z
+          .object({
+            success: z.literal(true),
+            messageData: z.object({
+              uid: z.number().int().positive(),
+              folder: z.string().min(1),
+            }),
+          })
+          .parse(
+            await this.client.request("message", { folder: folderId, uid }),
+          );
+        if (
+          response.messageData.uid !== uid ||
+          response.messageData.folder !== folderId
+        )
+          throw new Error("SmarterMail presence identity mismatch");
+        present.push(smarterMailMessageId(folderId, uid));
+      } catch (error) {
+        if (!(error instanceof SmarterMailMessageNotFoundError)) throw error;
+      }
+    }
+    return present;
   }
   async getMessage(messageId: string) {
     const { folder, uid } = parseSmarterMailMessageId(messageId);

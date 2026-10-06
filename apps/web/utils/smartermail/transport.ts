@@ -5,7 +5,7 @@ import {
   LocalMailSyncPausedError,
   withLocalMailSyncBudget,
 } from "@/utils/email/local-mail-sync-budget";
-import { SmarterMailApiError } from "./errors";
+import { SmarterMailApiError, SmarterMailMessageNotFoundError } from "./errors";
 
 export class SmarterMailTransport {
   private readonly baseUrl: string;
@@ -113,6 +113,16 @@ export class SmarterMailTransport {
       );
     }
     if (!response.ok) {
+      if (path === "mail/message" && response.status === 400) {
+        let missing = false;
+        try {
+          const payload = await response.json();
+          missing =
+            payload?.success === false &&
+            payload?.message === "The message was not found.";
+        } catch {}
+        if (missing) throw new SmarterMailMessageNotFoundError();
+      }
       // Raw server errors can contain mail content or credentials.
       throw new SmarterMailApiError(
         `SmarterMail request failed (${response.status})`,
