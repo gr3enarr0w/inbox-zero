@@ -1,4 +1,5 @@
 import { extractErrorInfo, isRetryableError } from "@/utils/gmail/retry";
+import { SmarterMailApiError } from "@/utils/smartermail/errors";
 import {
   isProviderRateLimitModeError,
   toRateLimitProvider,
@@ -23,6 +24,9 @@ export function isEmailProviderRateLimitError({
   }
   if (rateLimitProvider === "microsoft") {
     return isOutlookRetryableError(extractOutlookErrorInfo(error)).isRateLimit;
+  }
+  if (rateLimitProvider === "smartermail") {
+    return error instanceof SmarterMailApiError && error.status === 429;
   }
 
   return false;

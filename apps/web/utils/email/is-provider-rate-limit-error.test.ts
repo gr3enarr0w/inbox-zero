@@ -1,8 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { ProviderRateLimitModeError } from "@/utils/email/rate-limit-mode-error";
+import { SmarterMailApiError } from "@/utils/smartermail/errors";
 import { isEmailProviderRateLimitError } from "./is-provider-rate-limit-error";
 
 describe("isEmailProviderRateLimitError", () => {
+  it("recognizes SmarterMail throttling without treating other failures as throttling", () => {
+    for (const status of [401, 429, 500]) {
+      expect(
+        isEmailProviderRateLimitError({
+          error: new SmarterMailApiError("Request failed", status),
+          provider: "smartermail",
+        }),
+      ).toBe(status === 429);
+    }
+  });
   it("recognizes active rate-limit mode without provider context", () => {
     expect(
       isEmailProviderRateLimitError({
