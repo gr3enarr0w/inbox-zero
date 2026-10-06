@@ -8,6 +8,8 @@ export const operations = {
   messagesUid: { method: "POST", path: "mail/messages-uid", readOnly: true },
   message: { method: "POST", path: "mail/message", readOnly: true },
   search: { method: "POST", path: "mail/search", readOnly: true },
+  contactSources: { method: "GET", path: "contacts/sources", readOnly: true },
+  contacts: { method: "POST", path: "contacts/contacts-all", readOnly: true },
   categories: { method: "GET", path: "user-categories", readOnly: true },
   categorySettings: {
     method: "GET",
