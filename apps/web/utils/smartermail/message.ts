@@ -67,7 +67,7 @@ export function normalizeSmarterMailMessage(
   const metadata = messageSchema.parse(summary ?? {});
   const data = { ...metadata, ...detail };
   const rawHeaders = parseHeaders(data.header ?? "");
-  const subject = rawHeaders.subject ?? data.subject ?? "";
+  const subject = data.subject ?? rawHeaders.subject ?? "";
   const date = rawHeaders.date ?? data.date ?? data.dateSent ?? "";
   const received = new Date(
     data.internalDate ?? data.date ?? data.dateSent ?? date,
@@ -93,12 +93,17 @@ export function normalizeSmarterMailMessage(
     headers: {
       ...rawHeaders,
       from:
+        (typeof data.from === "string"
+          ? data.from
+          : data.from &&
+            (data.from.name
+              ? `${data.from.name} <${data.from.email}>`
+              : data.from.email)) ??
         rawHeaders.from ??
-        (typeof data.from === "string" ? data.from : data.from?.email) ??
         "",
-      to: rawHeaders.to ?? data.to ?? "",
-      cc: rawHeaders.cc ?? data.cc,
-      bcc: rawHeaders.bcc ?? data.bcc,
+      to: data.to ?? rawHeaders.to ?? "",
+      cc: data.cc ?? rawHeaders.cc,
+      bcc: data.bcc ?? rawHeaders.bcc,
       date,
       subject,
     },

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { SmarterMailUnsupportedError } from "@/utils/smartermail/provider/error";
+import { InvalidMailboxSyncCursorError } from "@/utils/email/mailbox-sync";
 import { createEmailProviderMailboxSource } from "./source";
 import type { EmailProvider } from "@/utils/email/types";
 
@@ -55,6 +56,22 @@ describe("SmarterMail mailbox source scope", () => {
       folderId: "Archive",
       limit: 20,
     });
+    getMailboxSyncPage.mockRejectedValueOnce(
+      new InvalidMailboxSyncCursorError(),
+    );
+    expect(
+      await source.readChanges({
+        position: {
+          streamId: "Archive",
+          checkpoint: "evicted-session",
+          generation: "generation",
+        },
+        session: { accountId: "account", generation: "generation" },
+        requestId: "request",
+        pageSize: 20,
+        signal: new AbortController().signal,
+      }),
+    ).toEqual({ status: "reset_required", scopeId: "Archive" });
   });
   it("does not repeatedly retry an unsupported complete conversation lookup", async () => {
     const source = createEmailProviderMailboxSource({

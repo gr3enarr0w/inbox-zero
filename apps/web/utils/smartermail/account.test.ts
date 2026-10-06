@@ -1,12 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import prisma from "@/utils/__mocks__/prisma";
 import { getSmarterMailClientForEmail } from "@/utils/smartermail/account";
+import { encryptToken } from "@/utils/encryption";
 
 const { constructed } = vi.hoisted(() => ({ constructed: vi.fn() }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/utils/prisma");
 vi.mock("@/env", () => ({
-  env: { SMARTERMAIL_ALLOWED_ORIGINS: "https://mail.example.com" },
+  env: {
+    SMARTERMAIL_ALLOWED_ORIGINS: "https://mail.example.com",
+    EMAIL_ENCRYPT_SECRET: "test-secret",
+    EMAIL_ENCRYPT_SALT: "test-salt",
+  },
 }));
 vi.mock("@/utils/smartermail/client", () => ({
   SmarterMailClient: class {
@@ -17,7 +22,20 @@ vi.mock("@/utils/smartermail/client", () => ({
 }));
 
 describe("SmarterMail account isolation", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    prisma.emailAccount.findFirst.mockResolvedValue({
+      account: {
+        id: "account-a",
+        userId: "user-a",
+        smarterMailBaseUrl: "https://mail.example.com",
+        access_token: "access-a",
+        refresh_token: "refresh-a",
+        expires_at: null,
+        updatedAt: new Date(1000),
+      },
+    } as never);
+  });
   it("requires an active provider account belonging to the requested user", async () => {
     prisma.emailAccount.findFirst.mockResolvedValue(null);
     await expect(
@@ -36,22 +54,12 @@ describe("SmarterMail account isolation", () => {
     });
     expect(constructed).not.toHaveBeenCalled();
   });
-  it("persists rotated credentials only against the original active account", async () => {
-    prisma.emailAccount.findFirst.mockResolvedValue({
-      account: {
-        id: "account-a",
-        userId: "user-a",
-        smarterMailBaseUrl: "https://mail.example.com",
-        access_token: "access-a",
-        refresh_token: "refresh-a",
-        expires_at: null,
-        updatedAt: new Date(1000),
-      },
-    } as never);
+  it("persists rotated tokens despite an unrelated account metadata update", async () => {
+    const stored = encryptedTokens("access-a", "refresh-a");
+    prisma.$queryRaw.mockResolvedValue([stored]);
     prisma.account.updateMany.mockResolvedValue({ count: 1 });
     await getSmarterMailClientForEmail({ emailAccountId: "mailbox-a" });
     const options = constructed.mock.calls[0][0];
-    expect(options.tokens.accessToken).toBe("access-a");
     await options.onTokensChanged({
       accessToken: "access-new",
       refreshToken: "refresh-new",
@@ -63,30 +71,86 @@ describe("SmarterMail account isolation", () => {
         userId: "user-a",
         provider: "smartermail",
         disconnectedAt: null,
-        updatedAt: new Date(1000),
+        smarterMailBaseUrl: "https://mail.example.com",
+        ...stored,
       },
       data: {
         access_token: "access-new",
         refresh_token: "refresh-new",
         expires_at: new Date(10_000),
-        updatedAt: expect.any(Date),
       },
     });
-    const persistedRevision =
-      prisma.account.updateMany.mock.calls[0][0].data.updatedAt;
+    expect(prisma.account.updateMany.mock.calls[0][0].where).not.toHaveProperty(
+      "updatedAt",
+    );
+    expect(prisma.$queryRaw).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.stringContaining('"disconnectedAt" IS NULL'),
+      ]),
+      "account-a",
+      "user-a",
+      "https://mail.example.com",
+    );
+    const rotated = encryptedTokens("access-new", "refresh-new");
+    prisma.$queryRaw.mockResolvedValue([rotated]);
     await options.onTokensChanged({
       accessToken: "access-next",
       refreshToken: "refresh-next",
     });
-    expect(prisma.account.updateMany.mock.calls[1][0].where.updatedAt).toEqual(
-      persistedRevision,
+    expect(prisma.account.updateMany.mock.calls[1][0].where).toMatchObject(
+      rotated,
     );
-    prisma.account.updateMany.mockResolvedValue({ count: 0 });
+  });
+  it("rejects a token pair replaced by reconnect before saving a refresh", async () => {
+    prisma.$queryRaw.mockResolvedValue([
+      encryptedTokens("reconnected-access", "refresh-a"),
+    ]);
+    await getSmarterMailClientForEmail({ emailAccountId: "mailbox-a" });
     await expect(
-      options.onTokensChanged({
-        accessToken: "access-new",
-        refreshToken: "refresh-new",
+      constructed.mock.calls[0][0].onTokensChanged({
+        accessToken: "stale-access",
+        refreshToken: "stale-refresh",
+      }),
+    ).rejects.toThrow("credentials changed");
+    expect(prisma.account.updateMany).not.toHaveBeenCalled();
+  });
+  it("rejects a changed server origin even when credentials are unchanged", async () => {
+    prisma.$queryRaw.mockResolvedValue([]);
+    await getSmarterMailClientForEmail({ emailAccountId: "mailbox-a" });
+    await expect(
+      constructed.mock.calls[0][0].onTokensChanged({
+        accessToken: "stale-access",
+        refreshToken: "stale-refresh",
+      }),
+    ).rejects.toThrow("credentials changed");
+    expect(prisma.$queryRaw).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.stringContaining('"smarterMailBaseUrl" = '),
+      ]),
+      "account-a",
+      "user-a",
+      "https://mail.example.com",
+    );
+    expect(prisma.account.updateMany).not.toHaveBeenCalled();
+  });
+  it("rejects a concurrent token replacement or disconnect between reading and saving", async () => {
+    prisma.$queryRaw.mockResolvedValue([
+      encryptedTokens("access-a", "refresh-a"),
+    ]);
+    prisma.account.updateMany.mockResolvedValue({ count: 0 });
+    await getSmarterMailClientForEmail({ emailAccountId: "mailbox-a" });
+    await expect(
+      constructed.mock.calls[0][0].onTokensChanged({
+        accessToken: "stale-access",
+        refreshToken: "stale-refresh",
       }),
     ).rejects.toThrow("credentials changed");
   });
 });
+
+function encryptedTokens(accessToken: string, refreshToken: string) {
+  return {
+    access_token: encryptToken(accessToken),
+    refresh_token: encryptToken(refreshToken),
+  };
+}

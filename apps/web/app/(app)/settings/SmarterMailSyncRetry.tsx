@@ -19,10 +19,16 @@ export function SmarterMailSyncRetry({
     retrySmarterMailSyncAction.bind(null, emailAccountId),
     {
       onSuccess: async () => {
-        await onRetry();
         toastSuccess({
           description: "Message processing will be retried on the next sync.",
         });
+        try {
+          await onRetry();
+        } catch {
+          toastError({
+            description: "Retry queued. Refresh the page to update its status.",
+          });
+        }
       },
       onError: ({ error }) =>
         toastError({ description: getActionErrorMessage(error) }),

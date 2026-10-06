@@ -78,6 +78,7 @@ import {
 } from "@/providers/EmailAccountProvider";
 import {
   isGoogleProvider,
+  isMicrosoftProvider,
   isSmarterMailProvider,
 } from "@/utils/email/provider-types";
 import { getOpenInMailboxLabel } from "@/utils/url";
@@ -1380,7 +1381,7 @@ export function MailShell() {
                 searchFolders={searchFolders}
                 searchVariant={getMailSearchVariant({
                   isAllAccounts,
-                  isOutlook: providerCapabilities.folders,
+                  isOutlook: isMicrosoftProvider(provider),
                   isNative: isSmarterMailProvider(provider),
                 })}
                 onToggleLayout={toggleLayout}

@@ -43,6 +43,21 @@ describe("SmarterMail folder removal reconciliation", () => {
     ).rejects.toThrow("presence response invalid");
     expect(prisma.smarterMailMailboxMessage.updateMany).not.toHaveBeenCalled();
   });
+  it("replays verified tombstones after a lost removal response", async () => {
+    prisma.smarterMailMailboxMessage.findMany.mockResolvedValue([
+      { messageId: "removed", missingScans: 2, removed: true },
+    ] as never);
+    verify.mockResolvedValue([]);
+    expect(
+      (await pruneSmarterMailMailbox("session", 4, 25, verify))
+        .removedMessageIds,
+    ).toEqual(["removed"]);
+    expect(prisma.smarterMailMailboxMessage.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.not.objectContaining({ removed: false }),
+      }),
+    );
+  });
 
   it("resumes pruning in bounded batches without returning a completed cursor too early", async () => {
     expect(

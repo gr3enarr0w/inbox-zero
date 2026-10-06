@@ -62,6 +62,36 @@ describe("SmarterMail message identity", () => {
     ]);
     expect(message.textPlain).toBe("Hello\nworld");
   });
+  it.each([
+    "Élodie <sender@example.com>",
+    { email: "sender@example.com", name: "Élodie" },
+  ])("prefers decoded server display fields over encoded RFC headers", (from) => {
+    const message = normalizeSmarterMailMessage(
+      {
+        messageData: {
+          date: "2026-01-02T12:00:00Z",
+          subject: "Résumé",
+          from,
+          to: "Zoë <reader@example.com>",
+          cc: "René <copy@example.com>",
+          bcc: "Anaïs <blind@example.com>",
+          header:
+            "Subject: =?UTF-8?B?UsOpc3Vtw6k=?=\r\nFrom: =?UTF-8?B?w4lsb2RpZQ==?= <sender@example.com>\r\nTo: encoded <reader@example.com>\r\nCc: encoded <copy@example.com>\r\nBcc: encoded <blind@example.com>\r\nMessage-ID: <fixture@example.com>",
+        },
+      },
+      "Inbox",
+      8,
+    );
+    expect(message.subject).toBe("Résumé");
+    expect(message.headers).toMatchObject({
+      subject: "Résumé",
+      from: "Élodie <sender@example.com>",
+      to: "Zoë <reader@example.com>",
+      cc: "René <copy@example.com>",
+      bcc: "Anaïs <blind@example.com>",
+      "message-id": "<fixture@example.com>",
+    });
+  });
   it("rejects incomplete or corrupt messages rather than classifying empty content", () => {
     expect(() =>
       normalizeSmarterMailMessage({ results: [] }, "Inbox", 1),

@@ -1,7 +1,12 @@
 import { randomUUID } from "node:crypto";
 import prisma from "@/utils/prisma";
 import { createEmailProvider } from "@/utils/email/provider";
-import { processSmarterMailMessage } from "@/utils/smartermail/sync-processing";
+import {
+  getSmarterMailSyncMessageKey,
+  processSmarterMailMessage,
+} from "@/utils/smartermail/sync-processing";
+import type { SmarterMailProvider } from "@/utils/email/smartermail";
+import { parseSmarterMailMessageId } from "@/utils/smartermail/message";
 import { getWebhookEmailAccount } from "@/utils/webhook/validate-webhook-account";
 import { getUserTier, hasAiAccess } from "@/utils/premium";
 import type { Logger } from "@/utils/logger";
@@ -32,6 +37,22 @@ export async function syncSmarterMailAccount(
     where: { emailAccountId },
   });
   try {
+    // A reclaimed lease cannot prove whether the previous worker sent an action.
+    await prisma.smarterMailSyncMessage.updateMany({
+      where: {
+        emailAccountId,
+        status: "claimed",
+        createdAt: { lt: now },
+        emailAccount: {
+          smarterMailSyncState: {
+            enabled: true,
+            leaseToken,
+            leaseUntil: { gt: new Date() },
+          },
+        },
+      },
+      data: { status: "review_required", processedAt: now },
+    });
     if (state.failures > 0 && state.nextRunAt > now) {
       await releaseLease(emailAccountId, leaseToken, {});
       return { skipped: true };
@@ -64,20 +85,46 @@ export async function syncSmarterMailAccount(
       });
       return { skipped: true };
     }
-    const provider = await createEmailProvider({
+    const provider = (await createEmailProvider({
       emailAccountId,
       provider: "smartermail",
       logger,
-    });
-    const page = await provider.getMessagesWithPagination({
-      inboxOnly: true,
-      maxResults: PAGE_SIZE,
-      pageToken: state.cursor ?? undefined,
+    })) as SmarterMailProvider;
+    let cursor = state.cursor;
+    if (cursor !== "process") {
+      const page = await provider.getMessagesWithPagination({
+        inboxOnly: true,
+        maxResults: PAGE_SIZE,
+        pageToken: cursor?.startsWith("scan:") ? cursor.slice(5) : undefined,
+      });
+      await prisma.smarterMailSyncMessage.createMany({
+        data: page.messages.map((message) => ({
+          emailAccountId,
+          messageId: message.id,
+          messageKey: getSmarterMailSyncMessageKey(message),
+          status: "queued",
+        })),
+        skipDuplicates: true,
+      });
+      cursor = page.nextPageToken ? `scan:${page.nextPageToken}` : "process";
+      if (cursor !== "process") {
+        await releaseLease(emailAccountId, leaseToken, {
+          cursor,
+          failures: 0,
+          nextRunAt: new Date(Date.now() + 60_000),
+        });
+        return { processed: 0, reviewRequired: 0, hasMore: true };
+      }
+    }
+    const queued = await prisma.smarterMailSyncMessage.findMany({
+      where: { emailAccountId, status: "queued" },
+      orderBy: [{ createdAt: "asc" }, { messageKey: "asc" }],
+      take: PAGE_SIZE,
     });
     let processed = 0;
     let reviewRequired = 0;
     let budgetExceeded = false;
-    for (const message of page.messages) {
+    for (const pending of queued) {
       if (Date.now() - now.getTime() > 240_000) {
         budgetExceeded = true;
         break;
@@ -92,25 +139,61 @@ export async function syncSmarterMailAccount(
         data: { leaseUntil: new Date(Date.now() + LEASE_MS) },
       });
       if (!renewed.count) return { skipped: true };
-      const result = await processSmarterMailMessage({
-        provider,
-        message,
-        rules: emailAccount.rules,
-        emailAccount,
-        isTest: false,
-        modelType: "default",
-        logger,
-      });
+      const { folder } = parseSmarterMailMessageId(pending.messageId);
+      const present =
+        (await provider.hasMessagesInFolder(folder, [pending.messageId]))
+          .length > 0;
+      const message = present
+        ? await provider.getMessage(pending.messageId)
+        : null;
+      if (
+        !message ||
+        getSmarterMailSyncMessageKey(message) !== pending.messageKey
+      ) {
+        await prisma.smarterMailSyncMessage.updateMany({
+          where: {
+            emailAccountId,
+            messageKey: pending.messageKey,
+            status: "queued",
+            emailAccount: {
+              smarterMailSyncState: {
+                enabled: true,
+                leaseToken,
+                leaseUntil: { gt: new Date() },
+              },
+            },
+          },
+          data: { status: "skipped", processedAt: new Date() },
+        });
+        continue;
+      }
+      const result = await processSmarterMailMessage(
+        {
+          provider,
+          message,
+          rules: emailAccount.rules,
+          emailAccount,
+          isTest: false,
+          modelType: "default",
+          logger,
+        },
+        leaseToken,
+        pending.messageKey,
+      );
       if (result === "completed") processed++;
       if (result === "review_required") reviewRequired++;
     }
     await releaseLease(emailAccountId, leaseToken, {
-      cursor: budgetExceeded ? state.cursor : (page.nextPageToken ?? null),
+      cursor: budgetExceeded || queued.length === PAGE_SIZE ? "process" : null,
       failures: 0,
       lastSyncedAt: new Date(),
       nextRunAt: new Date(Date.now() + 60_000),
     });
-    return { processed, reviewRequired, hasMore: !!page.nextPageToken };
+    return {
+      processed,
+      reviewRequired,
+      hasMore: budgetExceeded || queued.length === PAGE_SIZE,
+    };
   } catch {
     const failures = state.failures + 1;
     await releaseLease(emailAccountId, leaseToken, {

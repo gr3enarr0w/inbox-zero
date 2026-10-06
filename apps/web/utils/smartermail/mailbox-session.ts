@@ -58,8 +58,22 @@ export async function getSmarterMailMailboxSession({
     const count = await prisma.smarterMailMailboxSession.count({
       where: { emailAccountId, folderId },
     });
-    if (count >= 20)
-      throw new Error("Too many mailbox sync sessions; reuse a cursor");
+    if (count >= 20) {
+      const oldest = await prisma.smarterMailMailboxSession.findMany({
+        where: { emailAccountId, folderId },
+        orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
+        skip: 19,
+        select: { id: true },
+      });
+      if (oldest.length)
+        await prisma.smarterMailMailboxSession.deleteMany({
+          where: {
+            id: { in: oldest.map(({ id }) => id) },
+            emailAccountId,
+            folderId,
+          },
+        });
+    }
     session = await prisma.smarterMailMailboxSession.create({
       data: { id: randomUUID(), emailAccountId, folderId, after },
     });

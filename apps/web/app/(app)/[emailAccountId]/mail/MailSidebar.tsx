@@ -452,6 +452,11 @@ export function MailSidebar({
                     setIsAddingLabel((open) => !open);
                   }}
                   disabled={readOnlyLabels}
+                  title={
+                    readOnlyLabels
+                      ? "Create categories in your mail server settings."
+                      : undefined
+                  }
                   aria-expanded={isAddingLabel}
                   aria-label={`Create ${labelSingular}`}
                   className="rounded-md p-0.5 text-muted-foreground hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"

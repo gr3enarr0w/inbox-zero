@@ -38,7 +38,11 @@ export class SmarterMailMutationsProvider extends SmarterMailContactsProvider {
     if (labelId)
       for (const id of ids)
         await this.labelMessage({ messageId: id, labelId, labelName: null });
-    await this.move(ids, await this.getOrCreateFolderIdByName("Archive"));
+    const archive =
+      (await this.getFolders()).find(
+        (folder) => folder.systemType === "ARCHIVE",
+      )?.id ?? (await this.getOrCreateFolderIdByName("Archive"));
+    await this.move(ids, archive);
   }
   async archiveThread(id: string, _owner: string) {
     await this.archiveMessages([id]);

@@ -107,4 +107,27 @@ describe("durable SmarterMail mailbox cursor", () => {
     ).rejects.toBeInstanceOf(InvalidMailboxSyncCursorError);
     expect(prisma.smarterMailMailboxSession.findFirst).not.toHaveBeenCalled();
   });
+  it("allows rebootstrap after reaching the per-folder session cap", async () => {
+    prisma.smarterMailMailboxSession.count.mockResolvedValue(20);
+    prisma.smarterMailMailboxSession.findMany.mockResolvedValue([
+      { id: sessionId },
+    ] as never);
+    prisma.smarterMailMailboxSession.create.mockResolvedValue({
+      id: "replacement",
+      generation: 1,
+    } as never);
+    const result = await getSmarterMailMailboxSession({
+      emailAccountId: "account",
+      folderId: "Inbox",
+      after: new Date(0),
+    });
+    expect(result.session.id).toBe("replacement");
+    expect(prisma.smarterMailMailboxSession.deleteMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: [sessionId] },
+        emailAccountId: "account",
+        folderId: "Inbox",
+      },
+    });
+  });
 });

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { SmarterMailProvider } from "@/utils/email/smartermail";
 import { SmarterMailClient } from "@/utils/smartermail/client";
+import { smarterMailMessageId } from "@/utils/smartermail/message";
 import { createScopedLogger } from "@/utils/logger";
 vi.mock("server-only", () => ({}));
 vi.mock("@/utils/smartermail/watch", () => ({}));
@@ -85,5 +86,32 @@ describe("SmarterMail account capabilities", () => {
         ([operation]) => operation === "categorySettings",
       ),
     ).toBe(true);
+  });
+  it.each([
+    "archive",
+    "ARCHIVE",
+  ])("archives into existing role folder %s", async (path) => {
+    const client = new SmarterMailClient({
+      baseUrl: "https://mail.example.com",
+      tokens: { accessToken: "test", refreshToken: "test" },
+    });
+    const request = vi
+      .spyOn(client, "request")
+      .mockImplementation(async (operation) =>
+        operation === "folders"
+          ? { folderList: [{ path, name: path }] }
+          : { success: true },
+      );
+    const provider = new SmarterMailProvider(
+      client,
+      createScopedLogger("archive-test"),
+      "fixture",
+    );
+    await provider.archiveMessage(smarterMailMessageId("Inbox", 7));
+    expect(request).not.toHaveBeenCalledWith("addFolder", expect.anything());
+    expect(request).toHaveBeenCalledWith(
+      "moveMessages",
+      expect.objectContaining({ destinationFolder: path }),
+    );
   });
 });

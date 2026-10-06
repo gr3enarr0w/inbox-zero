@@ -1,23 +1,31 @@
 import { createHash } from "node:crypto";
 import prisma from "@/utils/prisma";
 import { runRules } from "@/utils/ai/choose-rule/run-rules";
-import { isDuplicateError } from "@/utils/prisma-helpers";
 import type { ParsedMessage } from "@/utils/types";
 
 export async function processSmarterMailMessage(
   options: Parameters<typeof runRules>[0],
+  leaseToken: string,
+  messageKey: string,
 ) {
   const { message, emailAccount, logger } = options;
   const emailAccountId = emailAccount.id;
-  const messageKey = getSmarterMailSyncMessageKey(message);
-  try {
-    await prisma.smarterMailSyncMessage.create({
-      data: { emailAccountId, messageKey, messageId: message.id },
-    });
-  } catch (error) {
-    if (isDuplicateError(error)) return "duplicate";
-    throw error;
-  }
+  const claim = await prisma.smarterMailSyncMessage.updateMany({
+    where: {
+      emailAccountId,
+      messageKey,
+      status: "queued",
+      emailAccount: {
+        smarterMailSyncState: {
+          enabled: true,
+          leaseToken,
+          leaseUntil: { gt: new Date() },
+        },
+      },
+    },
+    data: { status: "claimed" },
+  });
+  if (!claim.count) return "duplicate";
   try {
     const results = await runRules(options);
     if (
