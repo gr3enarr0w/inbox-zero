@@ -90,9 +90,18 @@ const parsedEnv = createEnv({
     // Local Microsoft emulation only; used for both OAuth and Microsoft Graph APIs.
     MICROSOFT_BASE_URL: z.string().url().optional(),
     SMARTERMAIL_ALLOWED_ORIGINS: z.string().optional(),
-    THUNDERBIRD_BRIDGE_URL: z.string().url().optional(),
-    THUNDERBIRD_BRIDGE_TOKEN: z.string().optional(),
-    THUNDERBIRD_BRIDGE_OWNER_EMAIL: z.string().email().optional(),
+    THUNDERBIRD_BRIDGE_URL: z.preprocess(
+      optionalEnvValue,
+      z.string().url().optional(),
+    ),
+    THUNDERBIRD_BRIDGE_TOKEN: z.preprocess(
+      optionalEnvValue,
+      z.string().optional(),
+    ),
+    THUNDERBIRD_BRIDGE_OWNER_EMAIL: z.preprocess(
+      optionalEnvValue,
+      z.string().email().optional(),
+    ),
     MICROSOFT_CLIENT_ID: z.string().optional(),
     MICROSOFT_CLIENT_SECRET: z.string().optional(),
     MICROSOFT_TENANT_ID: z.preprocess(

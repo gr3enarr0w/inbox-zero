@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import prisma from "@/utils/__mocks__/prisma";
 import { createScopedLogger } from "@/utils/logger";
 import { ActionType } from "@/generated/prisma/enums";
@@ -6,6 +6,7 @@ import { runRules } from "@/utils/ai/choose-rule/run-rules";
 import { createEmailProvider } from "@/utils/email/provider";
 import { getWebhookEmailAccount } from "@/utils/webhook/validate-webhook-account";
 import type { ParsedMessage } from "@/utils/types";
+import { ThunderbirdBridgeError } from "./errors";
 import { syncThunderbirdAccount } from "./sync";
 import { getThunderbirdSyncMessageKey } from "./sync-processing";
 
@@ -42,6 +43,7 @@ const message: ParsedMessage = {
 const key = getThunderbirdSyncMessageKey("account", message);
 
 describe("Thunderbird bounded polling", () => {
+  afterEach(() => vi.useRealTimers());
   beforeEach(() => {
     vi.resetAllMocks();
     prisma.thunderbirdSyncState.updateMany.mockResolvedValue({ count: 1 });
@@ -74,7 +76,7 @@ describe("Thunderbird bounded polling", () => {
     read.mockResolvedValue(message);
     prisma.thunderbirdSyncMessage.createMany.mockResolvedValue({ count: 1 });
     prisma.thunderbirdSyncMessage.findMany.mockResolvedValue([
-      { messageId: message.id, messageKey: key },
+      { messageId: message.id, messageKey: key, status: "queued" },
     ] as never);
     prisma.thunderbirdSyncMessage.count.mockResolvedValue(0);
     prisma.thunderbirdSyncMessage.updateMany.mockResolvedValue({ count: 1 });
@@ -152,11 +154,13 @@ describe("Thunderbird bounded polling", () => {
     };
     const secondKey = getThunderbirdSyncMessageKey("account", second);
     prisma.thunderbirdSyncMessage.findMany.mockResolvedValue([
-      { messageId: message.id, messageKey: key },
-      { messageId: second.id, messageKey: secondKey },
+      { messageId: message.id, messageKey: key, status: "queued" },
+      { messageId: second.id, messageKey: secondKey, status: "queued" },
     ] as never);
     read
-      .mockRejectedValueOnce(new Error("Offline"))
+      .mockRejectedValueOnce(
+        new ThunderbirdBridgeError("READ_FAILED", "Offline"),
+      )
       .mockResolvedValueOnce(second);
     vi.mocked(runRules).mockRejectedValueOnce(new Error("Response lost"));
     await syncThunderbirdAccount("account", logger);
@@ -168,7 +172,7 @@ describe("Thunderbird bounded polling", () => {
           status: "queued",
           emailAccount: expect.any(Object),
         }),
-        data: expect.objectContaining({ status: "retry_ready" }),
+        data: expect.objectContaining({ status: "read_retry_1" }),
       }),
     );
     expect(prisma.thunderbirdSyncMessage.updateMany).toHaveBeenCalledWith({
@@ -233,6 +237,139 @@ describe("Thunderbird bounded polling", () => {
     await syncThunderbirdAccount("account", logger);
     expect(createEmailProvider).not.toHaveBeenCalled();
     expect(runRules).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["queued", "read_retry_1"],
+    ["read_retry_1", "read_retry_2"],
+    ["read_retry_2", "read_failed"],
+    ["retry_ready", "read_retry_1"],
+  ])("persists bounded read retries from %s to %s", async (status, nextStatus) => {
+    prisma.thunderbirdSyncMessage.findMany.mockResolvedValue([
+      { messageId: message.id, messageKey: key, status },
+    ] as never);
+    read.mockRejectedValue(new ThunderbirdBridgeError("TIMEOUT", "Offline"));
+    await syncThunderbirdAccount("account", logger);
+    expect(prisma.thunderbirdSyncMessage.updateMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          emailAccountId: "account",
+          messageKey: key,
+          status,
+          emailAccount: {
+            thunderbirdSyncState: expect.objectContaining({
+              leaseToken: expect.any(String),
+              leaseUntil: { gt: expect.any(Date) },
+            }),
+          },
+        }),
+        data: { status: nextStatus, processedAt: expect.any(Date) },
+      }),
+    );
+    expect(runRules).not.toHaveBeenCalled();
+    expect(prisma.thunderbirdSyncMessage.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          emailAccountId: "account",
+          OR: [
+            { status: "queued" },
+            {
+              status: { in: ["retry_ready", "read_retry_1", "read_retry_2"] },
+              OR: [
+                { processedAt: null },
+                { processedAt: { lte: expect.any(Date) } },
+              ],
+            },
+          ],
+        },
+      }),
+    );
+  });
+
+  it.each([
+    "OUT_OF_SCOPE",
+    "MESSAGE_NOT_FOUND",
+    "UNSUPPORTED",
+  ])("does not automatically retry %s", async (code) => {
+    read.mockRejectedValue(new ThunderbirdBridgeError(code, "Rejected"));
+    await syncThunderbirdAccount("account", logger);
+    expect(prisma.thunderbirdSyncMessage.updateMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "review_required" }),
+      }),
+    );
+    expect(runRules).not.toHaveBeenCalled();
+  });
+
+  it("quarantines malformed response schemas rather than scheduling availability retries", async () => {
+    read.mockRejectedValue(new Error("Invalid bridge response"));
+    await syncThunderbirdAccount("account", logger);
+    expect(prisma.thunderbirdSyncMessage.updateMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "review_required" }),
+      }),
+    );
+    expect(runRules).not.toHaveBeenCalled();
+  });
+
+  it("rechecks a legacy retry identity before claiming any action", async () => {
+    prisma.thunderbirdSyncMessage.findMany.mockResolvedValue([
+      { messageId: message.id, messageKey: key, status: "retry_ready" },
+    ] as never);
+    read.mockResolvedValue({ ...message, subject: "Changed" });
+    await syncThunderbirdAccount("account", logger);
+    expect(runRules).not.toHaveBeenCalled();
+    expect(prisma.thunderbirdSyncMessage.updateMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ status: "retry_ready" }),
+        data: expect.objectContaining({ status: "review_required" }),
+      }),
+    );
+  });
+
+  it("executes a recovered retry only after atomically claiming its exact persisted state", async () => {
+    prisma.thunderbirdSyncMessage.findMany.mockResolvedValue([
+      { messageId: message.id, messageKey: key, status: "read_retry_1" },
+    ] as never);
+    await syncThunderbirdAccount("account", logger);
+    expect(runRules).toHaveBeenCalledTimes(1);
+    expect(prisma.thunderbirdSyncMessage.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: "read_retry_1",
+          emailAccount: expect.any(Object),
+        }),
+        data: { status: "claimed" },
+      }),
+    );
+  });
+
+  it.each([
+    "success",
+    "failure",
+  ])("fences a %s read response when the lease expires during the read", async (outcome) => {
+    vi.useFakeTimers();
+    const afterLeaseExpiry = new Date(Date.now() + 660_000);
+    read.mockImplementation(async () => {
+      vi.setSystemTime(afterLeaseExpiry);
+      prisma.thunderbirdSyncMessage.updateMany.mockResolvedValue({ count: 0 });
+      if (outcome === "failure")
+        throw new ThunderbirdBridgeError("TIMEOUT", "Late response");
+      return message;
+    });
+    await syncThunderbirdAccount("account", logger);
+    expect(runRules).not.toHaveBeenCalled();
+    expect(prisma.thunderbirdSyncMessage.updateMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          emailAccount: expect.objectContaining({
+            thunderbirdSyncState: expect.objectContaining({
+              leaseUntil: { gt: afterLeaseExpiry },
+            }),
+          }),
+        }),
+      }),
+    );
   });
 
   it("deduplicates native IDs across moves/restarts, retaining account and RFC identity", () => {

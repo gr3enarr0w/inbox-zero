@@ -54,6 +54,7 @@ export class SmarterMailSendersProvider extends SmarterMailQueriesProvider {
       senderEmail: sender,
       maxResults: limit,
     });
+    this.assertEmptySearchIsComplete(page);
     return page.messages.map((message) => ({
       id: message.threadId,
       snippet: message.snippet,

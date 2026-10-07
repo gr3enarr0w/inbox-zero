@@ -6,8 +6,10 @@ import { getWebhookEmailAccount } from "@/utils/webhook/validate-webhook-account
 import { getUserTier, hasAiAccess } from "@/utils/premium";
 import {
   getThunderbirdSyncMessageKey,
+  isThunderbirdReadPendingStatus,
   processThunderbirdSyncMessage,
 } from "@/utils/thunderbird/sync-processing";
+import { ThunderbirdBridgeError } from "@/utils/thunderbird/errors";
 import type { Logger } from "@/utils/logger";
 import type { ParsedMessage } from "@/utils/types";
 
@@ -19,6 +21,14 @@ const supportedActions: ReadonlySet<ActionType> = new Set([
   ActionType.MARK_READ,
   ActionType.STAR,
 ]);
+
+// Persisted states bound retries across worker restarts without replaying claimed writes.
+const readRetryTransitions: Readonly<Record<string, string>> = {
+  queued: "read_retry_1",
+  retry_ready: "read_retry_1",
+  read_retry_1: "read_retry_2",
+  read_retry_2: "read_failed",
+};
 
 export async function syncThunderbirdAccount(
   emailAccountId: string,
@@ -134,7 +144,19 @@ export async function syncThunderbirdAccount(
     });
     if (!checkpoint.count) return { skipped: true };
     const queued = await prisma.thunderbirdSyncMessage.findMany({
-      where: { emailAccountId, status: "queued" },
+      where: {
+        emailAccountId,
+        OR: [
+          { status: "queued" },
+          {
+            status: { in: ["retry_ready", "read_retry_1", "read_retry_2"] },
+            OR: [
+              { processedAt: null },
+              { processedAt: { lte: new Date(Date.now() - 60_000) } },
+            ],
+          },
+        ],
+      },
       orderBy: [{ createdAt: "asc" }, { messageKey: "asc" }],
       take: 25,
     });
@@ -146,9 +168,33 @@ export async function syncThunderbirdAccount(
         data: { leaseUntil: new Date(Date.now() + 600_000) },
       });
       if (!renewed.count) return { skipped: true };
+      const pendingStatus = pending.status;
+      if (!isThunderbirdReadPendingStatus(pendingStatus)) continue;
+      const pendingFence = () => ({
+        emailAccountId,
+        messageKey: pending.messageKey,
+        status: pendingStatus,
+        emailAccount: {
+          thunderbirdSyncState: { ...fence, leaseUntil: { gt: new Date() } },
+        },
+      });
       let message: ParsedMessage;
       try {
         message = await provider.getMessage(pending.messageId);
+      } catch (error) {
+        const transient =
+          error instanceof ThunderbirdBridgeError &&
+          (error.code === "READ_FAILED" || error.code === "TIMEOUT");
+        const retryStatus = transient
+          ? (readRetryTransitions[pendingStatus] ?? "review_required")
+          : "review_required";
+        await prisma.thunderbirdSyncMessage.updateMany({
+          where: pendingFence(),
+          data: { status: retryStatus, processedAt: new Date() },
+        });
+        continue;
+      }
+      try {
         if (
           getThunderbirdSyncMessageKey(emailAccountId, message) !==
           pending.messageKey
@@ -156,18 +202,8 @@ export async function syncThunderbirdAccount(
           throw new Error("Thunderbird queued identity changed");
       } catch {
         await prisma.thunderbirdSyncMessage.updateMany({
-          where: {
-            emailAccountId,
-            messageKey: pending.messageKey,
-            status: "queued",
-            emailAccount: {
-              thunderbirdSyncState: {
-                ...fence,
-                leaseUntil: { gt: new Date() },
-              },
-            },
-          },
-          data: { status: "retry_ready", processedAt: new Date() },
+          where: pendingFence(),
+          data: { status: "review_required", processedAt: new Date() },
         });
         continue;
       }
@@ -183,6 +219,7 @@ export async function syncThunderbirdAccount(
         },
         leaseToken,
         pending.messageKey,
+        pendingStatus,
       );
       if (status === "completed") processed++;
     }

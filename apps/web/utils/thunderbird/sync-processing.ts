@@ -7,13 +7,15 @@ export async function processThunderbirdSyncMessage(
   options: Parameters<typeof runRules>[0],
   leaseToken: string,
   messageKey: string,
+  pendingStatus: "queued" | "retry_ready" | "read_retry_1" | "read_retry_2",
 ) {
+  if (!isThunderbirdReadPendingStatus(pendingStatus)) return "duplicate";
   const emailAccountId = options.emailAccount.id;
   const claim = await prisma.thunderbirdSyncMessage.updateMany({
     where: {
       emailAccountId,
       messageKey,
-      status: "queued",
+      status: pendingStatus,
       emailAccount: {
         thunderbirdSyncState: {
           enabled: true,
@@ -64,4 +66,15 @@ export function getThunderbirdSyncMessageKey(
       ]),
     )
     .digest("hex");
+}
+
+export function isThunderbirdReadPendingStatus(
+  status: string,
+): status is "queued" | "retry_ready" | "read_retry_1" | "read_retry_2" {
+  return (
+    status === "queued" ||
+    status === "retry_ready" ||
+    status === "read_retry_1" ||
+    status === "read_retry_2"
+  );
 }

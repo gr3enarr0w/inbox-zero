@@ -22,13 +22,22 @@ export class SmarterMailSearchProvider extends SmarterMailThreadsProvider {
   async getThreadsWithLabel(
     options: Parameters<EmailProvider["getThreadsWithLabel"]>[0],
   ) {
-    return (
-      await this.searchMessages({
-        query: "",
-        labelIds: [options.labelId],
-        maxResults: options.maxResults,
-      })
-    ).messages.map(toThread);
+    const result = await this.searchMessages({
+      query: "",
+      labelIds: [options.labelId],
+      maxResults: options.maxResults,
+    });
+    this.assertEmptySearchIsComplete(result);
+    return result.messages.map(toThread);
+  }
+  protected assertEmptySearchIsComplete(result: {
+    messages: ParsedMessage[];
+    nextPageToken?: string;
+  }) {
+    if (!result.messages.length && result.nextPageToken)
+      throw new SmarterMailUnsupportedError(
+        "incomplete one-shot searches beyond the bounded search page",
+      );
   }
   async searchThreads(options: Parameters<EmailProvider["searchThreads"]>[0]) {
     const result = await this.searchMessages(options);

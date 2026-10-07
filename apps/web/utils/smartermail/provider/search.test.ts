@@ -22,6 +22,77 @@ function setup() {
 }
 
 describe("SmarterMail scoped search", () => {
+  it.each([
+    "label",
+    "sender",
+  ])("reports an incomplete %s lookup instead of false-empty results after the folder cap", async (consumer) => {
+    const { provider, request } = setup();
+    const folders = Array.from({ length: 21 }, (_, index) => ({
+      path: `Folder${String(index).padStart(2, "0")}`,
+    }));
+    request.mockImplementation(async (operation, body) =>
+      operation === "folders"
+        ? { folderList: folders }
+        : body?.folder === "Folder20"
+          ? { results: [{ uid: 1 }] }
+          : { results: [] },
+    );
+    const lookup =
+      consumer === "label"
+        ? provider.getThreadsWithLabel({
+            labelId: "sm-category:Receipts",
+            maxResults: 5,
+          })
+        : provider.getThreadsFromSenderWithSubject("sender@example.com", 5);
+    await expect(lookup).rejects.toThrow("incomplete");
+    const searches = request.mock.calls.filter(
+      ([operation]) => operation === "search",
+    );
+    expect(searches).toHaveLength(20);
+    expect(searches.some(([, body]) => body?.folder === "Folder20")).toBe(
+      false,
+    );
+    expect(searches[0]?.[1]).toMatchObject(
+      consumer === "label"
+        ? {
+            categoryFilter: {
+              filteredCategories: ["Receipts"],
+              includeNoCategory: false,
+            },
+          }
+        : { fieldsToSearch: 1, query: "sender@example.com" },
+    );
+  });
+  it("returns genuinely exhausted empty one-shot searches", async () => {
+    const { provider, request } = setup();
+    request.mockImplementation(async (operation) =>
+      operation === "folders"
+        ? { folderList: [{ path: "Inbox" }] }
+        : { results: [] },
+    );
+    await expect(
+      provider.getThreadsWithLabel({ labelId: "sm-category:Receipts" }),
+    ).resolves.toEqual([]);
+    await expect(
+      provider.getThreadsFromSenderWithSubject("sender@example.com", 5),
+    ).resolves.toEqual([]);
+  });
+  it("preserves empty bounded pages and continuation for paginated search consumers", async () => {
+    const { provider, request } = setup();
+    request.mockImplementation(async (operation) =>
+      operation === "folders"
+        ? {
+            folderList: Array.from({ length: 21 }, (_, index) => ({
+              path: `Folder${index}`,
+            })),
+          }
+        : { results: [] },
+    );
+    const result = await provider.searchThreads({ query: "" });
+    expect(result.threads).toEqual([]);
+    expect(result.nextPageToken).toMatch(/^sm-folders:/);
+  });
+
   it("keeps inbox/category/date filters together instead of widening into all folders", async () => {
     const { provider, request } = setup();
     request
