@@ -5,6 +5,11 @@ export const operations = {
     readOnly: true,
   },
   messages: { method: "POST", path: "mail/messages", readOnly: true },
+  messageMetadata: {
+    method: "POST",
+    path: "mail/messagemetadata",
+    readOnly: true,
+  },
   messagesUid: { method: "POST", path: "mail/messages-uid", readOnly: true },
   message: { method: "POST", path: "mail/message", readOnly: true },
   search: { method: "POST", path: "mail/search", readOnly: true },

@@ -284,7 +284,7 @@ async function seedEmailStats(client: Client, emailAccountId: string) {
          CURRENT_TIMESTAMP - INTERVAL '1 day', $4, $5, $6, $7, NULL,
          $8, $9, false, $10, $11
        )
-       ON CONFLICT ("emailAccountId", "threadId", "messageId") DO UPDATE
+       ON CONFLICT ("emailAccountId", "threadId", "messageId", "metadataVersion") DO UPDATE
        SET date = EXCLUDED.date, read = EXCLUDED.read, sent = EXCLUDED.sent,
            inbox = EXCLUDED.inbox, "updatedAt" = CURRENT_TIMESTAMP`,
       [

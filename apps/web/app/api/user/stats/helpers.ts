@@ -32,6 +32,7 @@ export async function getEmailFieldStats({
     by: [field],
     where: {
       emailAccountId,
+      removedAt: null,
       sent: isSent,
       date: {
         gte: dateRange.fromDate ? new Date(dateRange.fromDate) : undefined,

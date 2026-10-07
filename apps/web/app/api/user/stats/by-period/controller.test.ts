@@ -25,6 +25,12 @@ describe("getStatsByPeriod", () => {
       ...unknown[],
     ];
     const rawSqlText = queryStrings.join("");
+    const where = queryValues.find(
+      (value): value is { text: string; values: unknown[] } =>
+        Boolean(value && typeof value === "object" && "text" in value),
+    );
+    expect(where?.text).toContain('"removedAt" IS NULL');
+    expect(where?.values).toContain("email-account-1");
 
     expect(rawSqlText).not.toContain(maliciousPeriod);
     expect(queryValues).toContain(maliciousPeriod);

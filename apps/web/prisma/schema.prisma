@@ -148,6 +148,7 @@ model EmailAccount {
   smarterMailSyncState SmarterMailSyncState?
   smarterMailSyncMessages SmarterMailSyncMessage[]
   smarterMailStatsImportState SmarterMailStatsImportState?
+  smarterMailStatsFolders SmarterMailStatsFolderState[]
   thunderbirdSyncState ThunderbirdSyncState?
   thunderbirdSyncMessages ThunderbirdSyncMessage[]
   id        String   @id @default(cuid())
@@ -1103,6 +1104,9 @@ model EmailMessage {
   updatedAt       DateTime @updatedAt
   threadId        String
   messageId       String
+  metadataVersion String @default("")
+  subject String?
+  rfcMessageId String?
   date            DateTime // date of the email
   from            String
   fromName        String? // sender's display name
@@ -1114,16 +1118,23 @@ model EmailMessage {
   draft           Boolean
   inbox           Boolean
   smarterMailStatsGeneration String?
+  providerFolderId String?
+  providerFolderGuid String?
+  providerUid BigInt?
+  removedAt DateTime?
+  lastCheckedAt DateTime?
 
   emailAccountId String
   emailAccount   EmailAccount @relation(fields: [emailAccountId], references: [id], onDelete: Cascade)
 
-  @@unique([emailAccountId, threadId, messageId])
+  @@unique([emailAccountId, threadId, messageId, metadataVersion], map: "EmailMessage_account_thread_message_version_key")
   @@index([emailAccountId, threadId])
   @@index([emailAccountId, date])
   @@index([emailAccountId, from])
   @@index([emailAccountId, fromName])
   @@index([emailAccountId, smarterMailStatsGeneration, date])
+  @@index([emailAccountId, providerFolderId, removedAt, lastCheckedAt], map: "EmailMessage_account_folder_removed_checked_idx")
+  @@index([emailAccountId, providerFolderId, providerUid, removedAt], map: "EmailMessage_account_folder_uid_removed_idx")
 }
 
 model ResponseTime {
@@ -2862,6 +2873,7 @@ model SmarterMailStatsImportState {
   after DateTime?
   before DateTime
   historyComplete Boolean @default(false)
+  historyRequested Boolean @default(false)
   totalImported Int @default(0)
   completedAt DateTime?
   nextRunAt DateTime @default(now())
@@ -2870,4 +2882,46 @@ model SmarterMailStatsImportState {
   leaseUntil DateTime?
   importError String?
   updatedAt DateTime @updatedAt
+}
+
+model SmarterMailStatsFolderState {
+  emailAccountId String
+  emailAccount EmailAccount @relation(fields: [emailAccountId], references: [id], onDelete: Cascade)
+  folderId String
+  folderGuid String?
+  cursor String?
+  uidCursor String?
+  uidGeneration String @default(cuid())
+  baselineComplete Boolean @default(false)
+  uidScanComplete Boolean @default(false)
+  uidNextRefreshAt DateTime @default(now())
+  historyBefore DateTime
+  uids SmarterMailStatsUid[]
+  after DateTime?
+  before DateTime
+  refreshAfter DateTime?
+  historyComplete Boolean @default(false)
+  recentComplete Boolean @default(false)
+  generation String @default(cuid())
+  mode String @default("recent")
+  completedAt DateTime?
+  nextRefreshAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@id([emailAccountId, folderId])
+  @@index([emailAccountId, completedAt, nextRefreshAt], map: "SmarterMailStatsFolderState_account_completed_refresh_idx")
+}
+
+model SmarterMailStatsUid {
+  emailAccountId String
+  folderId String
+  uid BigInt
+  folderGuid String?
+  folder SmarterMailStatsFolderState @relation(fields: [emailAccountId, folderId], references: [emailAccountId, folderId], onDelete: Cascade)
+  generation String
+  needsImport Boolean @default(false)
+  removedAt DateTime?
+  lastCheckedAt DateTime?
+  @@id([emailAccountId, folderId, uid])
+  @@index([emailAccountId, folderId, needsImport], map: "SmarterMailStatsUid_account_folder_import_idx")
+  @@index([emailAccountId, folderId, generation, removedAt], map: "SmarterMailStatsUid_account_folder_generation_idx")
 }

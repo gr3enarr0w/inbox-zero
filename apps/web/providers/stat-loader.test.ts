@@ -69,6 +69,19 @@ describe("email stats import controller", () => {
     expect(await first).toBe(true);
     expect(loadPage).toHaveBeenCalledTimes(1);
   });
+  it("keeps retained historical totals separate from current cached totals", async () => {
+    const { loader, states } = fixture(
+      vi
+        .fn()
+        .mockResolvedValue({ data: { ...page(true).data, totalRetained: 5 } }),
+    );
+    expect(await loader.load("a", false)).toBe(true);
+    expect(states.a.progress).toEqual({
+      complete: true,
+      imported: 7,
+      retained: 5,
+    });
+  });
   it("keeps empty intermediate pages incomplete when a cursor remains", async () => {
     const { loader, states } = fixture(
       vi.fn().mockResolvedValue(page(false, 0)),

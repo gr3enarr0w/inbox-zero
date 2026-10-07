@@ -10,7 +10,11 @@ import { deleteUser } from "@/utils/user/delete";
 import { clearLastEmailAccountCookie } from "@/utils/cookies.server";
 import { LAST_EMAIL_ACCOUNT_COOKIE } from "@/utils/cookies";
 import { deleteTinybirdEmailData } from "@inboxzero/tinybird";
-import { deleteAccountAction, deleteEmailAccountAction } from "./user";
+import {
+  deleteAccountAction,
+  deleteEmailAccountAction,
+  resetAnalyticsAction,
+} from "./user";
 
 vi.mock("@/utils/prisma");
 vi.mock("@/utils/redis/thread-page-buffer", () => ({
@@ -656,3 +660,79 @@ function newPrismaKnownError(
     meta,
   });
 }
+
+describe("analytics refresh and reset", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    prisma.emailAccount.findUnique.mockResolvedValue({
+      email: "owner@example.com",
+      account: { userId: "user-1", provider: "smartermail" },
+    } as never);
+    prisma.smarterMailStatsImportState.upsert.mockResolvedValue({} as never);
+    prisma.smarterMailStatsImportState.updateMany.mockResolvedValue({
+      count: 1,
+    });
+    prisma.smarterMailStatsFolderState.updateMany.mockResolvedValue({
+      count: 1,
+    });
+    prisma.$transaction.mockImplementation(async (operations) =>
+      Promise.all(operations as Promise<unknown>[]),
+    );
+  });
+  it("refreshes SmarterMail while retaining every cached record and checkpoint", async () => {
+    const result = await resetAnalyticsAction("mailbox", {
+      confirmDelete: false,
+    });
+    expect(result?.data).toEqual({ mode: "refresh" });
+    expect(prisma.emailMessage.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.smarterMailStatsUid.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.smarterMailStatsFolderState.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ emailAccountId: "mailbox" }),
+        data: {
+          nextRefreshAt: expect.any(Date),
+          uidNextRefreshAt: expect.any(Date),
+          refreshAfter: expect.any(Date),
+        },
+      }),
+    );
+    expect(
+      prisma.smarterMailStatsImportState.updateMany.mock.calls[0][0].data,
+    ).toEqual({ nextRunAt: expect.any(Date), failures: 0, importError: null });
+  });
+  it("does not replace an active import's checkpoints", async () => {
+    prisma.smarterMailStatsImportState.updateMany.mockResolvedValue({
+      count: 0,
+    });
+    const result = await resetAnalyticsAction("mailbox", {
+      confirmDelete: false,
+    });
+    expect(result?.serverError).toBeDefined();
+    expect(prisma.emailMessage.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.smarterMailStatsImportState.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          emailAccountId: "mailbox",
+          OR: [{ leaseUntil: null }, { leaseUntil: { lte: expect.any(Date) } }],
+        },
+      }),
+    );
+  });
+  it("requires explicit confirmation before another provider's reset can remove cached analytics", async () => {
+    prisma.emailAccount.findUnique.mockResolvedValue({
+      email: "owner@example.com",
+      account: { userId: "user-1", provider: "google" },
+    } as never);
+    expect(
+      (await resetAnalyticsAction("mailbox", { confirmDelete: false }))
+        ?.serverError,
+    ).toBeDefined();
+    expect(prisma.emailMessage.deleteMany).not.toHaveBeenCalled();
+    expect(
+      (await resetAnalyticsAction("mailbox", { confirmDelete: true }))?.data,
+    ).toEqual({ mode: "reset" });
+    expect(prisma.emailMessage.deleteMany).toHaveBeenCalledWith({
+      where: { emailAccountId: "mailbox" },
+    });
+  });
+});

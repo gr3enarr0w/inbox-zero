@@ -3,11 +3,21 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import prisma from "@/utils/prisma";
 import { getMockMessage, createTestLogger } from "@/__tests__/helpers";
 import { saveParsedEmailMessages } from "@/utils/actions/stats-messages";
-import { reconcileSmarterMailStats } from "@/utils/smartermail/stats-prune";
-import { SmarterMailMessageNotFoundError } from "@/utils/smartermail/errors";
-import type { EmailProvider } from "@/utils/email/types";
+import { refreshSmarterMailUidIndex } from "@/utils/smartermail/stats-uid-index";
+import {
+  retainSmarterMailAbsentMetadata,
+  retainSmarterMailFolderMetadata,
+} from "@/utils/smartermail/stats-uid-work";
+import { smarterMailMessageId } from "@/utils/smartermail/message";
 
 vi.mock("server-only", () => ({}));
+vi.mock("@/utils/smartermail/local-sync-context", () => ({
+  withSmarterMailLocalSyncContext: (
+    _id: string,
+    _priority: string,
+    operation: () => Promise<unknown>,
+  ) => operation(),
+}));
 vi.mock("@/env", () => ({
   env: {
     DATABASE_URL:
@@ -24,8 +34,8 @@ const after = new Date("2026-07-01T00:00:00Z");
 const before = new Date("2026-10-01T00:00:00Z");
 const message = {
   ...getMockMessage({
-    id: "copy-one",
-    threadId: "copy-one",
+    id: smarterMailMessageId("Inbox", 1),
+    threadId: smarterMailMessageId("Inbox", 1),
     labelIds: ["INBOX"],
   }),
   internalDate: String(after.getTime()),
@@ -67,7 +77,11 @@ describe.skipIf(!process.env.RUN_DB_TESTS)(
     });
 
     it("retains distinct native copies and updates the same native row idempotently", async () => {
-      const second = { ...message, id: "copy-two", threadId: "copy-two" };
+      const second = {
+        ...message,
+        id: smarterMailMessageId("Inbox", 2),
+        threadId: smarterMailMessageId("Inbox", 2),
+      };
       expect(
         await saveParsedEmailMessages(
           emailAccountId,
@@ -88,11 +102,11 @@ describe.skipIf(!process.env.RUN_DB_TESTS)(
       });
       expect(rows).toHaveLength(2);
       expect(rows[0]).toMatchObject({
-        messageId: "copy-one",
+        messageId: message.id,
         smarterMailStatsGeneration: generation,
         inbox: false,
       });
-      expect(rows[1].messageId).toBe("copy-two");
+      expect(rows[1].messageId).toBe(second.id);
     });
 
     it("rejects an old writer waiting behind a lease transfer without modifying cache rows", async () => {
@@ -144,40 +158,183 @@ describe.skipIf(!process.env.RUN_DB_TESTS)(
       }
     });
 
-    it("removes verified stale references only inside the pass window", async () => {
-      await saveParsedEmailMessages(
-        emailAccountId,
-        [
-          message,
-          {
-            ...message,
-            id: "older-history",
-            threadId: "older-history",
-            internalDate: String(new Date("2026-01-01").getTime()),
-          },
-        ],
-        logger,
-      );
-      const getMessage = vi
-        .fn()
-        .mockRejectedValue(new SmarterMailMessageNotFoundError());
-      expect(
-        await reconcileSmarterMailStats({
+    it("retains removed native records and their full metadata", async () => {
+      const folder = await prisma.smarterMailStatsFolderState.create({
+        data: {
           emailAccountId,
+          folderId: "Inbox",
+          folderGuid: "guid",
           generation,
-          leaseToken,
-          after,
           before,
-          emailProvider: { getMessage } as unknown as EmailProvider,
-          logger,
-        }),
-      ).toEqual({ complete: true });
+          historyBefore: after,
+        },
+      });
+      await prisma.smarterMailStatsUid.create({
+        data: {
+          emailAccountId,
+          folderId: "Inbox",
+          uid: 1n,
+          generation,
+          needsImport: true,
+        },
+      });
+      await saveParsedEmailMessages(emailAccountId, [message], logger, {
+        generation,
+        leaseToken,
+        folderId: "Inbox",
+        folderGuid: "guid",
+      });
+      await retainSmarterMailAbsentMetadata(folder, 1n, leaseToken);
       const rows = await prisma.emailMessage.findMany({
         where: { emailAccountId },
       });
       expect(rows).toHaveLength(1);
-      expect(rows[0].messageId).toBe("older-history");
-      expect(getMessage).toHaveBeenCalledExactlyOnceWith("copy-one");
+      expect(rows[0]).toMatchObject({
+        messageId: message.id,
+        subject: message.subject,
+      });
+      expect(rows[0].removedAt).toBeInstanceOf(Date);
+      expect(
+        await prisma.smarterMailStatsUid.findUnique({
+          where: {
+            emailAccountId_folderId_uid: {
+              emailAccountId,
+              folderId: "Inbox",
+              uid: 1n,
+            },
+          },
+        }),
+      ).toMatchObject({ needsImport: false, removedAt: expect.any(Date) });
+    });
+    it("preserves a recycled UID version and optional header metadata without duplicating flags", async () => {
+      await prisma.smarterMailStatsFolderState.create({
+        data: {
+          emailAccountId,
+          folderId: "Inbox",
+          folderGuid: "guid",
+          generation,
+          before,
+          historyBefore: after,
+        },
+      });
+      const options = {
+        generation,
+        leaseToken,
+        folderId: "Inbox",
+        folderGuid: "guid",
+      };
+      const rich = {
+        ...message,
+        headers: {
+          ...message.headers,
+          "message-id": "<original@example.com>",
+          "list-unsubscribe": "<mailto:unsubscribe@example.com>",
+        },
+      };
+      await saveParsedEmailMessages(emailAccountId, [rich], logger, options);
+      await saveParsedEmailMessages(
+        emailAccountId,
+        [{ ...message, labelIds: [] }],
+        logger,
+        options,
+      );
+      const existing = await prisma.emailMessage.findMany({
+        where: { emailAccountId },
+      });
+      expect(existing).toHaveLength(1);
+      expect(existing[0]).toMatchObject({
+        rfcMessageId: "<original@example.com>",
+        unsubscribeLink: "<mailto:unsubscribe@example.com>",
+        inbox: false,
+      });
+      await saveParsedEmailMessages(
+        emailAccountId,
+        [{ ...message, subject: "Different native UID incarnation" }],
+        logger,
+        options,
+      );
+      const versions = await prisma.emailMessage.findMany({
+        where: { emailAccountId },
+        orderBy: { createdAt: "asc" },
+      });
+      expect(versions).toHaveLength(2);
+      expect(versions.filter((row) => row.removedAt === null)).toHaveLength(1);
+      expect(
+        versions.find((row) => row.subject === message.subject)?.removedAt,
+      ).toBeInstanceOf(Date);
+      expect(versions.every((row) => row.messageId === message.id)).toBe(true);
+    });
+    it("persists folder UID membership and queues uncached arrivals during the initial baseline", async () => {
+      const folder = await prisma.smarterMailStatsFolderState.create({
+        data: {
+          emailAccountId,
+          folderId: "Inbox",
+          folderGuid: "guid",
+          generation,
+          uidGeneration: "uid-baseline",
+          uidCursor: "saved-page",
+          before,
+          historyBefore: after,
+        },
+      });
+      await saveParsedEmailMessages(emailAccountId, [message], logger, {
+        generation,
+        leaseToken,
+        folderId: "Inbox",
+        folderGuid: "guid",
+      });
+      const getStatsFolderUids = vi
+        .fn()
+        .mockResolvedValueOnce({
+          uids: [1, 2],
+          total: 3,
+          nextPageToken: "arrival-page",
+        })
+        .mockResolvedValueOnce({ uids: [3], total: 3 });
+      await refreshSmarterMailUidIndex(
+        folder,
+        { getStatsFolderUids },
+        leaseToken,
+      );
+      expect(
+        getStatsFolderUids.mock.calls.map(([input]) => input.pageToken),
+      ).toEqual(["saved-page", "arrival-page"]);
+      const rows = await prisma.smarterMailStatsUid.findMany({
+        where: { emailAccountId },
+        orderBy: { uid: "asc" },
+      });
+      expect(rows.map((row) => [row.uid, row.needsImport])).toEqual([
+        [1n, false],
+        [2n, true],
+        [3n, true],
+      ]);
+      expect(
+        await prisma.smarterMailStatsFolderState.findUnique({
+          where: {
+            emailAccountId_folderId: { emailAccountId, folderId: "Inbox" },
+          },
+        }),
+      ).toMatchObject({
+        baselineComplete: true,
+        uidScanComplete: true,
+        uidCursor: null,
+      });
+      await retainSmarterMailFolderMetadata(folder, leaseToken);
+      expect(
+        await prisma.emailMessage.count({
+          where: { emailAccountId, removedAt: null },
+        }),
+      ).toBe(0);
+      expect(
+        await prisma.emailMessage.count({
+          where: { emailAccountId, removedAt: { not: null } },
+        }),
+      ).toBe(1);
+      expect(
+        await prisma.smarterMailStatsUid.count({
+          where: { emailAccountId, removedAt: { not: null } },
+        }),
+      ).toBe(3);
     });
   },
 );

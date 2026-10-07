@@ -39,7 +39,7 @@ export async function loadEmails(
   let hasMoreBefore = false;
 
   const newestEmailSaved = await prisma.emailMessage.findFirst({
-    where: { emailAccountId },
+    where: { emailAccountId, removedAt: null },
     orderBy: { date: "desc" },
   });
 
@@ -89,7 +89,7 @@ export async function loadEmails(
   }
 
   const oldestEmailSaved = await prisma.emailMessage.findFirst({
-    where: { emailAccountId },
+    where: { emailAccountId, removedAt: null },
     orderBy: { date: "asc" },
   });
 

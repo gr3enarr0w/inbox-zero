@@ -45,7 +45,7 @@ export function BulkArchive() {
   const categories = data?.categories ?? [];
   const hideEmptyCards =
     !senders.length &&
-    (isLoadingStats || !!statsError || statsProgress?.complete === false);
+    (isLoadingStats || !!statsError || statsProgress?.complete !== true);
   const autoCategorizeSenders = data?.autoCategorizeSenders ?? false;
 
   const emailGroups = useMemo(

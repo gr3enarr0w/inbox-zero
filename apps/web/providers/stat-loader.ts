@@ -3,7 +3,7 @@ import type { LoadEmailStatsResponse } from "@/app/api/user/stats/load/route";
 export type StatLoaderState = {
   isLoading: boolean;
   error: string | null;
-  progress: { complete: boolean; imported: number } | null;
+  progress: { complete: boolean; imported: number; retained?: number } | null;
 };
 
 type LoadPage = (
@@ -76,6 +76,9 @@ export class StatsLoader {
           complete,
           imported:
             "totalImported" in data ? Number(data.totalImported) : imported,
+          ...("totalRetained" in data
+            ? { retained: Number(data.totalRetained) }
+            : {}),
         };
         this.#update(accountId, { progress });
         if (complete) return true;

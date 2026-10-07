@@ -16,6 +16,7 @@ import {
   parseLastEmailAccountCookieValue,
 } from "@/utils/cookies";
 import {
+  resetAnalyticsBody,
   saveAboutBody,
   saveSignatureBody,
   saveWritingStyleBody,
@@ -80,11 +81,57 @@ export const saveWritingStyleAction = actionClient
 
 export const resetAnalyticsAction = actionClient
   .metadata({ name: "resetAnalytics" })
-  .action(async ({ ctx: { emailAccountId } }) => {
-    await prisma.emailMessage.deleteMany({
-      where: { emailAccountId },
-    });
-  });
+  .inputSchema(resetAnalyticsBody)
+  .action(
+    async ({
+      ctx: { emailAccountId, provider },
+      parsedInput: { confirmDelete },
+    }) => {
+      if (provider === "smartermail") {
+        const now = new Date();
+        await prisma.smarterMailStatsImportState.upsert({
+          where: { emailAccountId },
+          create: {
+            emailAccountId,
+            after: new Date(now.getTime() - 90 * 86_400_000),
+            before: now,
+          },
+          update: {},
+        });
+        const idle = {
+          OR: [{ leaseUntil: null }, { leaseUntil: { lte: now } }],
+        };
+        const [scheduled] = await prisma.$transaction([
+          prisma.smarterMailStatsImportState.updateMany({
+            where: { emailAccountId, ...idle },
+            data: { nextRunAt: now, failures: 0, importError: null },
+          }),
+          prisma.smarterMailStatsFolderState.updateMany({
+            where: {
+              emailAccountId,
+              emailAccount: { smarterMailStatsImportState: idle },
+            },
+            data: {
+              nextRefreshAt: now,
+              uidNextRefreshAt: now,
+              refreshAfter: now,
+            },
+          }),
+        ]);
+        if (!scheduled.count)
+          throw new SafeError(
+            "An analytics import is running. Please retry after it finishes.",
+          );
+        return { mode: "refresh" as const };
+      }
+      if (!confirmDelete)
+        throw new SafeError(
+          "Confirm before permanently deleting cached analytics.",
+        );
+      await prisma.emailMessage.deleteMany({ where: { emailAccountId } });
+      return { mode: "reset" as const };
+    },
+  );
 
 export const deleteAccountAction = actionClientUser
   .metadata({ name: "deleteAccount" })

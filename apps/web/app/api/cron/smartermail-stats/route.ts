@@ -11,7 +11,6 @@ export const GET = withError("cron/smartermail-stats", async (request) => {
     return new Response("Unauthorized", { status: 401 });
   const state = await prisma.smarterMailStatsImportState.findFirst({
     where: {
-      completedAt: null,
       nextRunAt: { lte: new Date() },
       OR: [{ leaseUntil: null }, { leaseUntil: { lte: new Date() } }],
       emailAccount: {

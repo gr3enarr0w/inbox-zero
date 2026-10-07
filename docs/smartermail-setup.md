@@ -53,3 +53,15 @@ The following capabilities return explicit unsupported-operation errors:
 | Advanced bulk sender operations, participant queries, and reply-history checks | [#24](https://github.com/gr3enarr0w/inbox-zero/issues/24) |
 
 Do not enable rules requiring these capabilities. Outbound send operations fail before making a mailbox mutation: the documented send response acknowledges success without returning a sent-message identifier, so retrying an acknowledged send could duplicate delivery. Existing AI classification is reused; this integration does not introduce a separate classifier.
+
+## Persistent statistics and sender data
+
+The statistics importer saves email metadata, folder checkpoints, and the native message-ID inventory in PostgreSQL. Redis and browser caches are not the source of truth for these records. Restarting or replacing application containers resumes committed work using the same database. Initial imports show partial analytics and cleanup results while other folders continue.
+
+Include `/api/cron/smartermail-stats` in the existing authenticated background scheduler so imports and refreshes continue when the browser is closed. Opening analytics or cleanup initializes the mailbox state. The scheduler processes a bounded batch for one due mailbox; database leases prevent concurrent workers from committing overlapping progress.
+
+Each folder keeps its own progress. Completed history is reused; subsequent refreshes compare the folder's message-ID inventory and import new IDs. This also discovers older messages moved into a folder. Bounded metadata refreshes update the flags of cached messages without downloading their bodies again. Native ID lists still need periodic enumeration because the server does not provide a verified change feed.
+
+Messages verified as absent are marked removed rather than deleted. A changed message identity or recreated folder retains the previous metadata version. Current analytics and cleanup queries exclude removed records, and the import notice reports retained history separately. Temporary API failures and malformed responses do not prove removal. Explicit account deletion still deletes that account's associated data.
+
+For Docker installations, mount PostgreSQL's data directory on persistent host storage or a named volume, keep that same mount across deployments, and back it up separately from the application image. If Redis is used, persist its data directory as well. Replace application containers without removing the database volume. Before a database migration, take a database backup; after redeployment, verify that cached-record counts and completed folder checkpoints remain present before resuming background imports.
