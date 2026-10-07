@@ -10,6 +10,7 @@ import {
 } from "./stats-uid-work";
 import { refreshSmarterMailCachedMetadata } from "./stats-prune";
 import { loadSmarterMailStats } from "./stats-import";
+import { getSmarterMailLocalSyncContext } from "./local-sync-context";
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/utils/prisma");
@@ -23,6 +24,7 @@ vi.mock("./stats-uid-work", () => ({
 }));
 vi.mock("./stats-prune", () => ({ refreshSmarterMailCachedMetadata: vi.fn() }));
 vi.mock("./local-sync-context", () => ({
+  getSmarterMailLocalSyncContext: vi.fn(),
   withSmarterMailLocalSyncContext: (
     _id: string,
     _priority: string,
@@ -262,6 +264,78 @@ describe("per-folder durable statistics coordinator", () => {
           failures: { increment: 1 },
           importError: expect.any(String),
           nextRunAt: expect.any(Date),
+        }),
+      }),
+    );
+  });
+  it("returns committed partial progress on its own deadline without failure backoff", async () => {
+    const deadline = new AbortController();
+    deadline.abort(new DOMException("Deadline", "TimeoutError"));
+    vi.mocked(getSmarterMailLocalSyncContext).mockReturnValue({
+      emailAccountId: "account",
+      priority: "backfill",
+      signal: deadline.signal,
+    });
+    const error = new Error("Request aborted");
+    error.name = "AbortError";
+    vi.mocked(importSmarterMailNewUids).mockRejectedValue(error);
+    prisma.emailMessage.count
+      .mockResolvedValueOnce(61)
+      .mockResolvedValueOnce(2);
+    expect(await load()).toMatchObject({
+      totalImported: 61,
+      totalRetained: 2,
+      complete: false,
+      importError: null,
+      pages: 1,
+    });
+    expect(
+      prisma.smarterMailStatsImportState.updateMany,
+    ).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          totalImported: 61,
+          failures: 0,
+          importError: null,
+          leaseToken: null,
+          nextRunAt: expect.any(Date),
+        }),
+      }),
+    );
+    const final =
+      prisma.smarterMailStatsImportState.updateMany.mock.lastCall![0].data;
+    expect((final.nextRunAt as Date).getTime()).toBeLessThan(Date.now() + 1000);
+    expect(prisma.smarterMailStatsFolderState.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          folderId: "Inbox",
+          emailAccount: expect.objectContaining({
+            smarterMailStatsImportState: expect.objectContaining({
+              leaseToken: expect.any(String),
+            }),
+          }),
+        }),
+        data: { updatedAt: expect.any(Date) },
+      }),
+    );
+  });
+  it("does not classify a provider abort as expiry of its own request budget", async () => {
+    const error = new Error("Provider aborted");
+    error.name = "AbortError";
+    vi.mocked(getSmarterMailLocalSyncContext).mockReturnValue({
+      emailAccountId: "account",
+      priority: "backfill",
+      signal: new AbortController().signal,
+    });
+    vi.mocked(importSmarterMailNewUids).mockRejectedValue(error);
+    await expect(load()).rejects.toThrow("Provider aborted");
+    expect(
+      prisma.smarterMailStatsImportState.updateMany,
+    ).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          failures: { increment: 1 },
+          importError: expect.any(String),
         }),
       }),
     );

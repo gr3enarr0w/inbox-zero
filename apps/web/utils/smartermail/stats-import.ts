@@ -9,7 +9,10 @@ import { importSmarterMailFolderMetadata } from "@/utils/smartermail/stats-folde
 import { importSmarterMailNewUids } from "@/utils/smartermail/stats-uid-work";
 import { retainSmarterMailFolderMetadata } from "@/utils/smartermail/stats-uid-work";
 import { refreshSmarterMailCachedMetadata } from "@/utils/smartermail/stats-prune";
-import { withSmarterMailLocalSyncContext } from "@/utils/smartermail/local-sync-context";
+import {
+  getSmarterMailLocalSyncContext,
+  withSmarterMailLocalSyncContext,
+} from "@/utils/smartermail/local-sync-context";
 
 export async function loadSmarterMailStats({
   emailAccountId,
@@ -50,6 +53,7 @@ export async function loadSmarterMailStats({
     leaseToken,
     leaseUntil: { gt: new Date() },
   });
+  let activeFolderId: string | undefined;
   return withSmarterMailLocalSyncContext(
     emailAccountId,
     "backfill",
@@ -191,6 +195,7 @@ export async function loadSmarterMailStats({
         }
         let saved = 0;
         if (folder) {
+          activeFolderId = folder.folderId;
           await refreshSmarterMailUidIndex(folder, provider, leaseToken);
           folder = await prisma.smarterMailStatsFolderState.findUniqueOrThrow({
             where: {
@@ -380,6 +385,45 @@ export async function loadSmarterMailStats({
           totalRetained,
         );
       } catch (error) {
+        if (isOwnDeadline(error)) {
+          const totalImported = await prisma.emailMessage.count({
+            where: { emailAccountId, removedAt: null },
+          });
+          const totalRetained = await prisma.emailMessage.count({
+            where: { emailAccountId, removedAt: { not: null } },
+          });
+          if (activeFolderId) {
+            await prisma.smarterMailStatsFolderState.updateMany({
+              where: {
+                emailAccountId,
+                folderId: activeFolderId,
+                emailAccount: { smarterMailStatsImportState: fence() },
+              },
+              data: { updatedAt: new Date() },
+            });
+          }
+          const checkpoint =
+            await prisma.smarterMailStatsImportState.updateMany({
+              where: fence(),
+              data: {
+                totalImported,
+                completedAt: null,
+                failures: 0,
+                importError: null,
+                nextRunAt: new Date(),
+                leaseToken: null,
+                leaseUntil: null,
+              },
+            });
+          const saved = Math.max(0, totalImported - state.totalImported);
+          return progress(
+            totalImported,
+            false,
+            saved,
+            checkpoint.count && saved ? 1 : 0,
+            totalRetained,
+          );
+        }
         await prisma.smarterMailStatsImportState.updateMany({
           where: fence(),
           data: {
@@ -396,6 +440,16 @@ export async function loadSmarterMailStats({
         throw error;
       }
     },
+  );
+}
+
+function isOwnDeadline(error: unknown) {
+  const signal = getSmarterMailLocalSyncContext()?.signal;
+  if (!signal?.aborted || signal.reason?.name !== "TimeoutError") return false;
+  return (
+    error === signal.reason ||
+    (error instanceof Error &&
+      ["AbortError", "TimeoutError"].includes(error.name))
   );
 }
 

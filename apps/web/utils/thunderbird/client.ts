@@ -4,6 +4,8 @@ import { z } from "zod";
 import { ThunderbirdBridgeError } from "@/utils/thunderbird/errors";
 import {
   thunderbirdCommandSchema,
+  thunderbirdFolderSchema,
+  thunderbirdMessageSchema,
   type ThunderbirdOperation,
 } from "@/utils/thunderbird/types";
 
@@ -102,7 +104,11 @@ export class ThunderbirdClient {
     }
 
     const reader = response.body?.getReader();
-    if (!reader) throw new Error("Invalid Thunderbird bridge response");
+    if (!reader)
+      throw invalidBridgeResponse(
+        mutation,
+        "Invalid Thunderbird bridge response",
+      );
     const chunks: Uint8Array[] = [];
     let size = 0;
     try {
@@ -116,7 +122,10 @@ export class ThunderbirdClient {
         if (chunk.done) break;
         size += chunk.value.byteLength;
         if (size > 1_048_576)
-          throw new Error("Thunderbird response exceeds its size limit");
+          throw invalidBridgeResponse(
+            mutation,
+            "Thunderbird response exceeds its size limit",
+          );
         chunks.push(chunk.value);
       }
     } finally {
@@ -128,7 +137,7 @@ export class ThunderbirdClient {
         new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks)),
       );
     } catch {
-      throw new Error("Invalid Thunderbird bridge JSON");
+      throw invalidBridgeResponse(mutation, "Invalid Thunderbird bridge JSON");
     }
     if (!response.ok) {
       const error = z
@@ -149,7 +158,10 @@ export class ThunderbirdClient {
         })
         .safeParse(payload);
       if (!error.success)
-        throw new Error("Invalid Thunderbird bridge error response");
+        throw invalidBridgeResponse(
+          mutation,
+          "Invalid Thunderbird bridge error response",
+        );
       throw new ThunderbirdBridgeError(
         error.data.error,
         mutation
@@ -157,13 +169,26 @@ export class ThunderbirdClient {
           : `Thunderbird bridge read failed (${response.status})`,
       );
     }
-    const result = z
+    const envelope = z
       .object({
         result: z.object({ accountId: z.string().min(1) }).passthrough(),
       })
-      .parse(payload).result;
+      .safeParse(payload);
+    if (!envelope.success)
+      throw invalidBridgeResponse(
+        mutation,
+        "Invalid Thunderbird bridge result",
+      );
+    const result = envelope.data.result;
     if (this.accountId && result.accountId !== this.accountId)
-      throw new Error("Thunderbird bridge account scope mismatch");
+      throw invalidBridgeResponse(
+        mutation,
+        "Thunderbird bridge account scope mismatch",
+      );
+    if (mutation) {
+      const schema = mutationResultSchema(operation);
+      if (!schema.safeParse(result).success) throw bridgeTransportError(true);
+    }
     return result;
   }
 }
@@ -175,4 +200,19 @@ function bridgeTransportError(mutation: boolean) {
       ? "Thunderbird write outcome is unknown; inspect the mailbox before retrying"
       : "Thunderbird bridge read transport failed",
   );
+}
+
+function invalidBridgeResponse(mutation: boolean, message: string) {
+  return mutation ? bridgeTransportError(true) : new Error(message);
+}
+
+function mutationResultSchema(operation: ThunderbirdOperation) {
+  if (operation === "createFolder")
+    return z.object({ folder: thunderbirdFolderSchema });
+  if (operation === "createDraft")
+    return z.object({
+      draftId: z.number().int().positive(),
+      message: thunderbirdMessageSchema,
+    });
+  return z.object({ message: thunderbirdMessageSchema });
 }

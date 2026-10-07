@@ -119,6 +119,53 @@ describe("Thunderbird broker client", () => {
       "Invalid Thunderbird bridge JSON",
     );
   });
+  it.each([
+    "missing",
+    "oversize",
+    "json",
+    "utf8",
+    "schema",
+    "scope",
+    "error",
+  ])("preserves unknown write outcomes for %s responses without retrying", async (kind) => {
+    let response: Response;
+    if (kind === "missing") response = new Response(null);
+    else if (kind === "oversize")
+      response = new Response("x".repeat(1_048_577));
+    else if (kind === "json") response = new Response("{");
+    else if (kind === "utf8") response = new Response(new Uint8Array([0xff]));
+    else if (kind === "scope") response = reply({ accountId: "other" });
+    else if (kind === "error")
+      response = Response.json({ error: "UNRECOGNIZED" }, { status: 503 });
+    else response = reply({ accountId: "native" });
+    const fetcher = vi.fn().mockResolvedValue(response);
+    vi.stubGlobal("fetch", fetcher);
+    await expect(
+      client().request("createFolder", { name: "folder" }),
+    ).rejects.toMatchObject({ code: "WRITE_UNKNOWN" });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+  it("preserves a recognized broker rejection for a write", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          Response.json({ error: "OUT_OF_SCOPE" }, { status: 403 }),
+        ),
+    );
+    await expect(
+      client().request("createFolder", { name: "folder" }),
+    ).rejects.toMatchObject({ code: "OUT_OF_SCOPE" });
+  });
+  it("keeps local invalid commands outside unknown write handling", async () => {
+    const fetcher = vi.fn();
+    vi.stubGlobal("fetch", fetcher);
+    await expect(
+      client().request("createFolder", { name: "bad/name" }),
+    ).rejects.not.toMatchObject({ code: "WRITE_UNKNOWN" });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
   it("enforces a response body size bound", async () => {
     vi.stubGlobal(
       "fetch",
