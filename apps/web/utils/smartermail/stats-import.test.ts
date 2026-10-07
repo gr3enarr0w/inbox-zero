@@ -99,6 +99,14 @@ describe("per-folder durable statistics coordinator", () => {
     prisma.smarterMailStatsFolderState.count.mockResolvedValue(1);
     prisma.smarterMailStatsUid.count.mockResolvedValue(0);
     prisma.emailMessage.count.mockResolvedValue(0);
+    prisma.emailMessage.aggregate.mockResolvedValue({
+      _count: { _all: 10 },
+      _max: { lastCheckedAt: null },
+    } as never);
+    prisma.smarterMailStatsUid.aggregate.mockResolvedValue({
+      _count: { _all: 100 },
+      _max: { lastCheckedAt: null },
+    } as never);
     getStatsFolders.mockResolvedValue([{ id: "Inbox", guid: "guid" }]);
     vi.mocked(importSmarterMailFolderMetadata).mockResolvedValue(1);
     vi.mocked(importSmarterMailNewUids).mockResolvedValue(1);
@@ -279,6 +287,15 @@ describe("per-folder durable statistics coordinator", () => {
     const error = new Error("Request aborted");
     error.name = "AbortError";
     vi.mocked(importSmarterMailNewUids).mockRejectedValue(error);
+    prisma.emailMessage.aggregate
+      .mockResolvedValueOnce({
+        _count: { _all: 10 },
+        _max: { lastCheckedAt: null },
+      } as never)
+      .mockResolvedValueOnce({
+        _count: { _all: 61 },
+        _max: { lastCheckedAt: new Date() },
+      } as never);
     prisma.emailMessage.count
       .mockResolvedValueOnce(61)
       .mockResolvedValueOnce(2);
@@ -317,6 +334,59 @@ describe("per-folder durable statistics coordinator", () => {
         }),
         data: { updatedAt: expect.any(Date) },
       }),
+    );
+  });
+  it.each([
+    "none",
+    "uid",
+    "cursor",
+  ] as const)("backs off a no-message deadline unless UID checkpoints advanced (%s)", async (kind) => {
+    const deadline = new AbortController();
+    deadline.abort(new DOMException("Deadline", "TimeoutError"));
+    vi.mocked(getSmarterMailLocalSyncContext).mockReturnValue({
+      emailAccountId: "account",
+      priority: "backfill",
+      signal: deadline.signal,
+    });
+    const error = new Error("Request aborted");
+    error.name = "AbortError";
+    vi.mocked(importSmarterMailNewUids).mockRejectedValue(error);
+    if (kind === "uid")
+      prisma.smarterMailStatsUid.aggregate
+        .mockResolvedValueOnce({
+          _count: { _all: 100 },
+          _max: { lastCheckedAt: null },
+        } as never)
+        .mockResolvedValueOnce({
+          _count: { _all: 5000 },
+          _max: { lastCheckedAt: null },
+        } as never);
+    if (kind === "cursor")
+      prisma.smarterMailStatsFolderState.findUniqueOrThrow
+        .mockResolvedValueOnce(folder as never)
+        .mockResolvedValueOnce({
+          ...folder,
+          uidCursor: "next-folder-page",
+        } as never);
+    const result = await load();
+    const final =
+      prisma.smarterMailStatsImportState.updateMany.mock.lastCall![0].data;
+    if (kind !== "none") {
+      expect(result.pages).toBe(1);
+      expect(final.failures).toBe(0);
+      expect((final.nextRunAt as Date).getTime()).toBeLessThan(
+        Date.now() + 1000,
+      );
+    } else {
+      expect(result.pages).toBe(0);
+      expect(final.failures).toEqual({ increment: 1 });
+      expect(final.importError).toEqual(expect.any(String));
+      expect((final.nextRunAt as Date).getTime()).toBeGreaterThanOrEqual(
+        Date.now() + 59_000,
+      );
+    }
+    expect(prisma.smarterMailStatsFolderState.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { updatedAt: expect.any(Date) } }),
     );
   });
   it("does not classify a provider abort as expiry of its own request budget", async () => {

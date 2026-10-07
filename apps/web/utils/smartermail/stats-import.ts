@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { SmarterMailStatsFolderState } from "@/generated/prisma/client";
 import prisma from "@/utils/prisma";
 import type { EmailProvider } from "@/utils/email/types";
 import type { SmarterMailProvider } from "@/utils/email/smartermail";
@@ -54,6 +55,9 @@ export async function loadSmarterMailStats({
     leaseUntil: { gt: new Date() },
   });
   let activeFolderId: string | undefined;
+  let initialMessageProgress: string | undefined;
+  let initialUidProgress: string | undefined;
+  let initialFolder: SmarterMailStatsFolderState | undefined;
   return withSmarterMailLocalSyncContext(
     emailAccountId,
     "backfill",
@@ -72,6 +76,13 @@ export async function loadSmarterMailStats({
             importError: state.importError,
           };
         }
+        initialMessageProgress = JSON.stringify(
+          await prisma.emailMessage.aggregate({
+            where: { emailAccountId },
+            _count: { _all: true },
+            _max: { lastCheckedAt: true },
+          }),
+        );
         if (emailProvider.name !== "smartermail")
           throw new Error("Statistics provider scope mismatch");
         const provider = emailProvider as SmarterMailProvider;
@@ -196,6 +207,14 @@ export async function loadSmarterMailStats({
         let saved = 0;
         if (folder) {
           activeFolderId = folder.folderId;
+          initialFolder = folder;
+          initialUidProgress = JSON.stringify(
+            await prisma.smarterMailStatsUid.aggregate({
+              where: { emailAccountId, folderId: folder.folderId },
+              _count: { _all: true },
+              _max: { lastCheckedAt: true },
+            }),
+          );
           await refreshSmarterMailUidIndex(folder, provider, leaseToken);
           folder = await prisma.smarterMailStatsFolderState.findUniqueOrThrow({
             where: {
@@ -386,6 +405,42 @@ export async function loadSmarterMailStats({
         );
       } catch (error) {
         if (isOwnDeadline(error)) {
+          const messageProgress = JSON.stringify(
+            await prisma.emailMessage.aggregate({
+              where: { emailAccountId },
+              _count: { _all: true },
+              _max: { lastCheckedAt: true },
+            }),
+          );
+          let advanced =
+            initialMessageProgress !== undefined &&
+            messageProgress !== initialMessageProgress;
+          if (initialFolder) {
+            const latest =
+              await prisma.smarterMailStatsFolderState.findUniqueOrThrow({
+                where: {
+                  emailAccountId_folderId: {
+                    emailAccountId,
+                    folderId: initialFolder.folderId,
+                  },
+                },
+              });
+            const uidProgress = JSON.stringify(
+              await prisma.smarterMailStatsUid.aggregate({
+                where: { emailAccountId, folderId: initialFolder.folderId },
+                _count: { _all: true },
+                _max: { lastCheckedAt: true },
+              }),
+            );
+            advanced ||=
+              uidProgress !== initialUidProgress ||
+              latest.cursor !== initialFolder.cursor ||
+              latest.uidCursor !== initialFolder.uidCursor ||
+              (!initialFolder.uidScanComplete && latest.uidScanComplete) ||
+              (!initialFolder.baselineComplete && latest.baselineComplete) ||
+              (!initialFolder.recentComplete && latest.recentComplete) ||
+              (!initialFolder.historyComplete && latest.historyComplete);
+          }
           const totalImported = await prisma.emailMessage.count({
             where: { emailAccountId, removedAt: null },
           });
@@ -402,27 +457,41 @@ export async function loadSmarterMailStats({
               data: { updatedAt: new Date() },
             });
           }
+          const importError = advanced
+            ? null
+            : "Statistics import timed out before saving progress; retry to resume.";
           const checkpoint =
             await prisma.smarterMailStatsImportState.updateMany({
               where: fence(),
               data: {
                 totalImported,
                 completedAt: null,
-                failures: 0,
-                importError: null,
-                nextRunAt: new Date(),
+                failures: advanced ? 0 : { increment: 1 },
+                importError,
+                nextRunAt: new Date(
+                  Date.now() +
+                    (advanced
+                      ? 0
+                      : Math.min(
+                          3_600_000,
+                          60_000 * 2 ** Math.min(state.failures, 6),
+                        )),
+                ),
                 leaseToken: null,
                 leaseUntil: null,
               },
             });
           const saved = Math.max(0, totalImported - state.totalImported);
-          return progress(
-            totalImported,
-            false,
-            saved,
-            checkpoint.count && saved ? 1 : 0,
-            totalRetained,
-          );
+          return {
+            ...progress(
+              totalImported,
+              false,
+              saved,
+              checkpoint.count && advanced ? 1 : 0,
+              totalRetained,
+            ),
+            importError,
+          };
         }
         await prisma.smarterMailStatsImportState.updateMany({
           where: fence(),
