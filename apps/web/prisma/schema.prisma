@@ -147,6 +147,7 @@ model EmailAccount {
   smarterMailMailboxSessions SmarterMailMailboxSession[]
   smarterMailSyncState SmarterMailSyncState?
   smarterMailSyncMessages SmarterMailSyncMessage[]
+  smarterMailStatsImportState SmarterMailStatsImportState?
   thunderbirdSyncState ThunderbirdSyncState?
   thunderbirdSyncMessages ThunderbirdSyncMessage[]
   id        String   @id @default(cuid())
@@ -1112,6 +1113,7 @@ model EmailMessage {
   sent            Boolean
   draft           Boolean
   inbox           Boolean
+  smarterMailStatsGeneration String?
 
   emailAccountId String
   emailAccount   EmailAccount @relation(fields: [emailAccountId], references: [id], onDelete: Cascade)
@@ -1121,6 +1123,7 @@ model EmailMessage {
   @@index([emailAccountId, date])
   @@index([emailAccountId, from])
   @@index([emailAccountId, fromName])
+  @@index([emailAccountId, smarterMailStatsGeneration, date])
 }
 
 model ResponseTime {
@@ -2848,4 +2851,23 @@ model SmarterMailMailboxMessage {
   removed Boolean @default(false)
   @@id([sessionId, messageId])
   @@index([sessionId, generation, removed])
+}
+
+model SmarterMailStatsImportState {
+  emailAccountId String @id
+  emailAccount EmailAccount @relation(fields: [emailAccountId], references: [id], onDelete: Cascade)
+  cursor String?
+  generation String @default(cuid())
+  phase String @default("scan")
+  after DateTime?
+  before DateTime
+  historyComplete Boolean @default(false)
+  totalImported Int @default(0)
+  completedAt DateTime?
+  nextRunAt DateTime @default(now())
+  failures Int @default(0)
+  leaseToken String?
+  leaseUntil DateTime?
+  importError String?
+  updatedAt DateTime @updatedAt
 }

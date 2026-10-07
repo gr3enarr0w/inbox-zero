@@ -20,9 +20,15 @@ import { TooltipExplanation } from "@/components/TooltipExplanation";
 import { PageHeading } from "@/components/Typography";
 import { EmailStatsPreloader } from "@/components/EmailStatsPreloader";
 import { useProductAnalytics } from "@/hooks/useProductAnalytics";
+import { useStatLoader } from "@/providers/StatLoaderProvider";
 
 export function BulkArchive() {
   const analytics = useProductAnalytics("bulk_archive");
+  const {
+    isLoading: isLoadingStats,
+    error: statsError,
+    progress: statsProgress,
+  } = useStatLoader();
   const { isBulkCategorizing } = useCategorizeProgress();
   const [onboarding] = useQueryState("onboarding", parseAsBoolean);
   const [bulkAction, setBulkAction] = useState<BulkActionType>("archive");
@@ -37,6 +43,9 @@ export function BulkArchive() {
 
   const senders = data?.senders ?? [];
   const categories = data?.categories ?? [];
+  const hideEmptyCards =
+    !senders.length &&
+    (isLoadingStats || !!statsError || statsProgress?.complete === false);
   const autoCategorizeSenders = data?.autoCategorizeSenders ?? false;
 
   const emailGroups = useMemo(
@@ -95,15 +104,17 @@ export function BulkArchive() {
           </div>
         </div>
         <BulkArchiveProgress onComplete={handleProgressComplete} />
-        <BulkArchiveCards
-          emailGroups={emailGroups}
-          categories={categories}
-          bulkAction={bulkAction}
-          onCategoryChange={mutate}
-        />
+        {!hideEmptyCards && (
+          <BulkArchiveCards
+            emailGroups={emailGroups}
+            categories={categories}
+            bulkAction={bulkAction}
+            onCategoryChange={mutate}
+          />
+        )}
       </PageWrapper>
       <AutoCategorizationSetup
-        open={shouldShowSetup}
+        open={shouldShowSetup && !hideEmptyCards}
         onOpenChange={(open) => {
           analytics.captureAction("bulk_archive_setup_dialog_toggled", {
             open,

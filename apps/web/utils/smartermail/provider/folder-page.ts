@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { SmarterMailClient } from "@/utils/smartermail/client";
+import { InvalidMailboxSyncCursorError } from "@/utils/email/mailbox-sync";
 import { listingSchema } from "@/utils/smartermail/provider/schemas";
 
 const cursorSchema = z.object({
@@ -46,9 +47,7 @@ export async function fetchSmarterMailFolderPage({
       ),
     );
     if (cursor.fingerprint !== fingerprint || cursor.index >= inventory.length)
-      throw new Error(
-        "SmarterMail global page scope changed; restart the query",
-      );
+      throw new InvalidMailboxSyncCursorError();
     ({ index, skip } = cursor);
   }
   const results: Array<

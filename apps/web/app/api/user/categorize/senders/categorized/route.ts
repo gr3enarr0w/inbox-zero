@@ -14,7 +14,7 @@ async function getCategorizedSenders({
 }) {
   const [senders, categories, emailAccount] = await Promise.all([
     prisma.newsletter.findMany({
-      where: { emailAccountId, categoryId: { not: null } },
+      where: { emailAccountId },
       select: {
         id: true,
         email: true,

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { InvalidMailboxSyncCursorError } from "@/utils/email/mailbox-sync";
 import { fetchSmarterMailFolderPage } from "./folder-page";
 
 function fixture() {
@@ -86,7 +87,7 @@ describe("SmarterMail owned folder pagination", () => {
           ...patch,
           pageToken: page.nextPageToken,
         }),
-      ).rejects.toThrow("scope changed");
+      ).rejects.toBeInstanceOf(InvalidMailboxSyncCursorError);
     await expect(
       fetchSmarterMailFolderPage({ ...options, pageToken: "1" }),
     ).rejects.toThrow("page token");

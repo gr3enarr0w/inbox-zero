@@ -35,7 +35,7 @@ export const loadEmailStatsAction = actionClient
         logger,
       });
 
-      await loadEmails(
+      return loadEmails(
         {
           emailAccountId,
           emailProvider,
