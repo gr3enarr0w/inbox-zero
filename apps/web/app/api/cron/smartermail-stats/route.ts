@@ -18,14 +18,45 @@ export const GET = withError("cron/smartermail-stats", async (request) => {
       },
     },
     orderBy: { updatedAt: "asc" },
-    select: { emailAccountId: true },
+    select: {
+      emailAccountId: true,
+      failures: true,
+      nextRunAt: true,
+      updatedAt: true,
+    },
   });
   if (!state) return NextResponse.json({ due: 0 });
-  const emailProvider = await createEmailProvider({
-    emailAccountId: state.emailAccountId,
-    provider: "smartermail",
-    logger: request.logger,
-  });
+  let emailProvider: Awaited<ReturnType<typeof createEmailProvider>>;
+  try {
+    emailProvider = await createEmailProvider({
+      emailAccountId: state.emailAccountId,
+      provider: "smartermail",
+      logger: request.logger,
+    });
+  } catch {
+    const now = new Date();
+    await prisma.smarterMailStatsImportState.updateMany({
+      where: {
+        emailAccountId: state.emailAccountId,
+        nextRunAt: state.nextRunAt,
+        updatedAt: state.updatedAt,
+        OR: [{ leaseUntil: null }, { leaseUntil: { lte: now } }],
+      },
+      data: {
+        failures: { increment: 1 },
+        importError: "Statistics connection failed; retry to resume.",
+        nextRunAt: new Date(
+          now.getTime() +
+            Math.min(3_600_000, 60_000 * 2 ** Math.min(state.failures, 6)),
+        ),
+        updatedAt: now,
+      },
+    });
+    return NextResponse.json(
+      { due: 1, error: "Statistics connection failed; retry to resume." },
+      { status: 503 },
+    );
+  }
   const result = await loadEmails(
     {
       emailAccountId: state.emailAccountId,

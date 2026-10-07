@@ -7,6 +7,7 @@ import { createEmailProvider } from "@/utils/email/provider";
 import { getWebhookEmailAccount } from "@/utils/webhook/validate-webhook-account";
 import type { ParsedMessage } from "@/utils/types";
 import { ThunderbirdBridgeError } from "./errors";
+import { ThunderbirdClient } from "./client";
 import { syncThunderbirdAccount } from "./sync";
 import { getThunderbirdSyncMessageKey } from "./sync-processing";
 
@@ -43,7 +44,10 @@ const message: ParsedMessage = {
 const key = getThunderbirdSyncMessageKey("account", message);
 
 describe("Thunderbird bounded polling", () => {
-  afterEach(() => vi.useRealTimers());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
   beforeEach(() => {
     vi.resetAllMocks();
     prisma.thunderbirdSyncState.updateMany.mockResolvedValue({ count: 1 });
@@ -301,6 +305,39 @@ describe("Thunderbird bounded polling", () => {
     expect(runRules).not.toHaveBeenCalled();
   });
 
+  it.each([
+    "stream",
+    "malformed",
+  ])("classifies actual %s client responses before any action", async (failure) => {
+    const response =
+      failure === "stream"
+        ? new Response(
+            new ReadableStream({
+              pull(controller) {
+                controller.error(new Error("Private transport failure"));
+              },
+            }),
+          )
+        : Response.json({ error: "UNRECOGNIZED" }, { status: 503 });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+    const native = new ThunderbirdClient({
+      baseUrl: "http://127.0.0.1:8787",
+      token: "x".repeat(32),
+      accountId: "native",
+    });
+    read.mockImplementation(() =>
+      native.request("getMessage", { messageId: 1 }),
+    );
+    await syncThunderbirdAccount("account", logger);
+    expect(prisma.thunderbirdSyncMessage.updateMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: failure === "stream" ? "read_retry_1" : "review_required",
+        }),
+      }),
+    );
+    expect(runRules).not.toHaveBeenCalled();
+  });
   it("quarantines malformed response schemas rather than scheduling availability retries", async () => {
     read.mockRejectedValue(new Error("Invalid bridge response"));
     await syncThunderbirdAccount("account", logger);

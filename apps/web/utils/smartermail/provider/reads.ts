@@ -12,7 +12,10 @@ import {
 import { SmarterMailCategoriesProvider } from "@/utils/smartermail/provider/categories";
 import { SmarterMailUnsupportedError } from "@/utils/smartermail/provider/error";
 import { listingSchema } from "@/utils/smartermail/provider/schemas";
-import { fetchSmarterMailStatsMessages } from "@/utils/smartermail/provider/stats-metadata";
+import {
+  fetchSmarterMailStatsMessages,
+  SmarterMailStatsMetadataInconclusiveError,
+} from "@/utils/smartermail/provider/stats-metadata";
 import { fetchSmarterMailStatsUids } from "@/utils/smartermail/provider/stats-uids";
 import { parsePageToken } from "@/utils/smartermail/provider/helpers";
 
@@ -89,11 +92,27 @@ export class SmarterMailReadsProvider extends SmarterMailCategoriesProvider {
       page.results.some((row) => row.folder !== options.folderId)
     )
       throw new Error("SmarterMail statistics listing scope mismatch");
+    const ids = page.results.map((row) =>
+      smarterMailMessageId(row.folder, row.uid),
+    );
+    let messages: ParsedMessage[];
+    try {
+      messages = await fetchSmarterMailStatsMessages(this.client, ids);
+    } catch (error) {
+      if (!(error instanceof SmarterMailStatsMetadataInconclusiveError))
+        throw error;
+      messages = [];
+      for (const id of ids) {
+        try {
+          messages.push(await this.getStatsMessage(id));
+        } catch (detailError) {
+          if (!(detailError instanceof SmarterMailMessageNotFoundError))
+            throw detailError;
+        }
+      }
+    }
     return {
-      messages: await fetchSmarterMailStatsMessages(
-        this.client,
-        page.results.map((row) => smarterMailMessageId(row.folder, row.uid)),
-      ),
+      messages,
       nextPageToken:
         page.results.length === take ? String(skip + take) : undefined,
     };

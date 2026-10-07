@@ -116,6 +116,33 @@ describe("SmarterMail message identity", () => {
       ),
     ).toThrow("message identity mismatch");
   });
+  it.each([
+    undefined,
+    "Subject: Header subject\r\n",
+  ])("normalizes a null subject without inventing message metadata", (header) => {
+    const message = normalizeSmarterMailMessage(
+      {
+        messageData: {
+          uid: 1,
+          folder: "Inbox",
+          subject: null,
+          header,
+          internalDate: "2026-01-02T12:00:00Z",
+        },
+      },
+      "Inbox",
+      1,
+    );
+    expect(message.subject).toBe(header ? "Header subject" : "");
+    expect(message.headers.subject).toBe(message.subject);
+    expect(() =>
+      normalizeSmarterMailMessage(
+        { messageData: { subject: null } },
+        "Inbox",
+        1,
+      ),
+    ).toThrow("invalid date");
+  });
   it("rejects incomplete or corrupt messages rather than classifying empty content", () => {
     expect(() =>
       normalizeSmarterMailMessage({ results: [] }, "Inbox", 1),

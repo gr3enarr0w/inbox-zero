@@ -10,6 +10,7 @@ import {
 
 import { SmarterMailProvider } from "@/utils/email/smartermail";
 import { SmarterMailClient } from "@/utils/smartermail/client";
+import { SmarterMailMessageNotFoundError } from "@/utils/smartermail/errors";
 import { createScopedLogger } from "@/utils/logger";
 vi.mock("server-only", () => ({}));
 vi.mock("@/utils/smartermail/watch", () => ({}));
@@ -107,6 +108,129 @@ describe("SmarterMail statistics metadata batches", () => {
       messagesSince: after.toISOString(),
       take: 1,
     });
+  });
+  it.each([
+    "valid",
+    "missing",
+    "invalid",
+  ] as const)("date-page metadata fallback handles %s full responses without claiming absence", async (outcome) => {
+    const client = new SmarterMailClient({
+      baseUrl: "https://mail.example.com",
+      tokens: { accessToken: "test", refreshToken: "test" },
+    });
+    const request = vi
+      .spyOn(client, "request")
+      .mockResolvedValueOnce({ folderList: [{ path: "Inbox" }] })
+      .mockResolvedValueOnce({
+        success: true,
+        results: [{ uid: 1, folder: "Inbox" }],
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        results: [{ ...row(1), from: { email: "MAILER-DAEMON" } }],
+      })
+      .mockResolvedValueOnce({ folderList: [{ path: "Inbox" }] });
+    if (outcome === "missing")
+      request.mockRejectedValueOnce(new SmarterMailMessageNotFoundError());
+    else
+      request.mockResolvedValueOnce({
+        success: true,
+        messageData:
+          outcome === "valid"
+            ? { ...row(1), from: "MAILER-DAEMON" }
+            : { internalDate: row(1).internalDate },
+      });
+    const provider = new SmarterMailProvider(
+      client,
+      createScopedLogger("metadata-test"),
+      "account",
+    );
+    const result = provider.getStatsMessagesWithPagination({
+      folderId: "Inbox",
+      maxResults: 1,
+    });
+    if (outcome === "invalid") await expect(result).rejects.toThrow();
+    else {
+      const page = await result;
+      expect(page.messages).toHaveLength(outcome === "valid" ? 1 : 0);
+      expect(page.nextPageToken).toBe("1");
+    }
+    expect(request.mock.calls.map((call) => call[0])).toEqual([
+      "folders",
+      "messages",
+      "messageMetadata",
+      "folders",
+      "message",
+    ]);
+  });
+  it.each([
+    undefined,
+    "Subject: Header subject\r\n",
+  ])("accepts null native subjects using the header or blank fallback", async (header) => {
+    const client = new SmarterMailClient({
+      baseUrl: "https://mail.example.com",
+      tokens: { accessToken: "test", refreshToken: "test" },
+    });
+    vi.spyOn(client, "request")
+      .mockResolvedValueOnce({ folderList: [{ path: "Inbox" }] })
+      .mockResolvedValueOnce({
+        success: true,
+        results: [{ uid: 1, folder: "Inbox" }],
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        results: [{ ...row(1), subject: null }],
+      })
+      .mockResolvedValueOnce({ folderList: [{ path: "Inbox" }] })
+      .mockResolvedValueOnce({
+        success: true,
+        messageData: { ...row(1), subject: null, header },
+      });
+    const provider = new SmarterMailProvider(
+      client,
+      createScopedLogger("metadata-test"),
+      "account",
+    );
+    const page = await provider.getStatsMessagesWithPagination({
+      folderId: "Inbox",
+      maxResults: 1,
+    });
+    expect(page.messages[0].subject).toBe(header ? "Header subject" : "");
+    expect(page.messages[0].id).toBe(smarterMailMessageId("Inbox", 1));
+    expect(page.messages[0].internalDate).toBe(
+      String(new Date(row(1).internalDate).getTime()),
+    );
+  });
+  it("date-page metadata transport failures do not trigger detail fallback", async () => {
+    const client = new SmarterMailClient({
+      baseUrl: "https://mail.example.com",
+      tokens: { accessToken: "test", refreshToken: "test" },
+    });
+    const error = new Error("unavailable");
+    const request = vi
+      .spyOn(client, "request")
+      .mockResolvedValueOnce({ folderList: [{ path: "Inbox" }] })
+      .mockResolvedValueOnce({
+        success: true,
+        results: [{ uid: 1, folder: "Inbox" }],
+      })
+      .mockRejectedValueOnce(error);
+    const provider = new SmarterMailProvider(
+      client,
+      createScopedLogger("metadata-test"),
+      "account",
+    );
+    await expect(
+      provider.getStatsMessagesWithPagination({
+        folderId: "Inbox",
+        maxResults: 1,
+      }),
+    ).rejects.toBe(error);
+    expect(request.mock.calls.map((call) => call[0])).toEqual([
+      "folders",
+      "messages",
+      "messageMetadata",
+    ]);
   });
   it.each([
     { internalDate: "2026-09-01T00:00:00Z" },

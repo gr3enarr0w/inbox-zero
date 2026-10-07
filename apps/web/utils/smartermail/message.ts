@@ -4,7 +4,7 @@ import type { ParsedMessage } from "@/utils/types";
 const messageSchema = z.object({
   uid: z.number().int().positive().optional(),
   folder: z.string().optional(),
-  subject: z.string().optional(),
+  subject: z.string().nullish(),
   from: z
     .union([
       z.string(),

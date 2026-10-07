@@ -98,12 +98,7 @@ export class ThunderbirdClient {
         cache: "no-store",
       });
     } catch {
-      throw new ThunderbirdBridgeError(
-        mutation ? "WRITE_UNKNOWN" : "READ_FAILED",
-        mutation
-          ? "Thunderbird write outcome is unknown; inspect the mailbox before retrying"
-          : "Thunderbird bridge could not be reached",
-      );
+      throw bridgeTransportError(mutation);
     }
 
     const reader = response.body?.getReader();
@@ -112,7 +107,12 @@ export class ThunderbirdClient {
     let size = 0;
     try {
       while (true) {
-        const chunk = await reader.read();
+        let chunk: ReadableStreamReadResult<Uint8Array>;
+        try {
+          chunk = await reader.read();
+        } catch {
+          throw bridgeTransportError(mutation);
+        }
         if (chunk.done) break;
         size += chunk.value.byteLength;
         if (size > 1_048_576)
@@ -124,7 +124,9 @@ export class ThunderbirdClient {
     }
     let payload: unknown;
     try {
-      payload = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      payload = JSON.parse(
+        new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks)),
+      );
     } catch {
       throw new Error("Invalid Thunderbird bridge JSON");
     }
@@ -146,8 +148,10 @@ export class ThunderbirdClient {
           ]),
         })
         .safeParse(payload);
+      if (!error.success)
+        throw new Error("Invalid Thunderbird bridge error response");
       throw new ThunderbirdBridgeError(
-        error.success ? error.data.error : "READ_FAILED",
+        error.data.error,
         mutation
           ? "Thunderbird write failed or has an unknown outcome; do not retry automatically"
           : `Thunderbird bridge read failed (${response.status})`,
@@ -162,4 +166,13 @@ export class ThunderbirdClient {
       throw new Error("Thunderbird bridge account scope mismatch");
     return result;
   }
+}
+
+function bridgeTransportError(mutation: boolean) {
+  return new ThunderbirdBridgeError(
+    mutation ? "WRITE_UNKNOWN" : "READ_FAILED",
+    mutation
+      ? "Thunderbird write outcome is unknown; inspect the mailbox before retrying"
+      : "Thunderbird bridge read transport failed",
+  );
 }

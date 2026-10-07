@@ -76,6 +76,49 @@ describe("Thunderbird broker client", () => {
     ).rejects.toThrow("unknown");
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
+  it.each([
+    ["listFolders", "READ_FAILED"],
+    ["createFolder", "WRITE_UNKNOWN"],
+  ] as const)("classifies interrupted %s response streams safely", async (operation, code) => {
+    const response = new Response(
+      new ReadableStream({
+        pull(controller) {
+          controller.error(new Error("Private stream failure"));
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+    await expect(
+      client().request(
+        operation,
+        operation === "createFolder" ? { name: "folder" } : {},
+      ),
+    ).rejects.toMatchObject({ code });
+  });
+  it("keeps malformed HTTP error payloads terminal instead of availability failures", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          Response.json({ error: "UNRECOGNIZED" }, { status: 503 }),
+        ),
+    );
+    await expect(client().request("listFolders")).rejects.toThrow(
+      "Invalid Thunderbird bridge error response",
+    );
+  });
+  it("rejects invalid UTF-8 even when replacement decoding would produce valid JSON", async () => {
+    const bytes = Buffer.concat([
+      Buffer.from('{"result":{"accountId":"native","text":"'),
+      Buffer.from([0xff]),
+      Buffer.from('"}}'),
+    ]);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(bytes)));
+    await expect(client().request("listFolders")).rejects.toThrow(
+      "Invalid Thunderbird bridge JSON",
+    );
+  });
   it("enforces a response body size bound", async () => {
     vi.stubGlobal(
       "fetch",
