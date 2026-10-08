@@ -20,6 +20,7 @@ const LEASE_MS = 10 * 60 * 1000;
 export async function syncSmarterMailAccount(
   emailAccountId: string,
   logger: Logger,
+  reservedUntil?: Date,
 ) {
   const now = new Date();
   const leaseToken = randomUUID();
@@ -56,7 +57,11 @@ export async function syncSmarterMailAccount(
       },
       data: { status: "review_required", processedAt: now },
     });
-    if (state.failures > 0 && state.nextRunAt > now) {
+    if (
+      state.failures > 0 &&
+      state.nextRunAt > now &&
+      state.nextRunAt.getTime() !== reservedUntil?.getTime()
+    ) {
       await releaseLease(emailAccountId, leaseToken, {});
       return { skipped: true };
     }
