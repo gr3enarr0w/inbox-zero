@@ -38,6 +38,31 @@ describe("env LLM compatibility conversion", () => {
   it.each([
     "",
     "   ",
+  ])("defaults blank SmarterMail processing concurrency %j to one", async (value) => {
+    process.env.DEFAULT_LLMS = "openai:gpt-5.4-mini";
+    process.env.SMARTERMAIL_SYNC_CONCURRENCY = value;
+    const { env } = await import("./env");
+    expect(env.SMARTERMAIL_SYNC_CONCURRENCY).toBe(1);
+  });
+
+  it("accepts exactly two concurrent SmarterMail messages", async () => {
+    process.env.DEFAULT_LLMS = "openai:gpt-5.4-mini";
+    process.env.SMARTERMAIL_SYNC_CONCURRENCY = "2";
+    const { env } = await import("./env");
+    expect(env.SMARTERMAIL_SYNC_CONCURRENCY).toBe(2);
+  });
+
+  it("rejects SmarterMail concurrency above two", async () => {
+    process.env.DEFAULT_LLMS = "openai:gpt-5.4-mini";
+    process.env.SMARTERMAIL_SYNC_CONCURRENCY = "3";
+    await expect(import("./env")).rejects.toThrow(
+      "Invalid environment variables",
+    );
+  });
+
+  it.each([
+    "",
+    "   ",
   ])("disables an optional Thunderbird bridge with blank values %j", async (value) => {
     process.env.DEFAULT_LLMS = "openai:gpt-5.4-mini";
     process.env.THUNDERBIRD_BRIDGE_URL = value;
