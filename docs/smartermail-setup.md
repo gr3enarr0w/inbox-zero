@@ -54,6 +54,12 @@ The following capabilities return explicit unsupported-operation errors:
 
 Do not enable rules requiring these capabilities. Outbound send operations fail before making a mailbox mutation: the documented send response acknowledges success without returning a sent-message identifier, so retrying an acknowledged send could duplicate delivery. Existing AI classification is reused; this integration does not introduce a separate classifier.
 
+## Catch-up processing concurrency
+
+`SMARTERMAIL_SYNC_CONCURRENCY` controls concurrent message processing within each mailbox. It defaults to `1` and accepts only `1` or `2`. Set it to `2` on the application server to overlap independent messages during catch-up; return it to `1` after catch-up. Queue worker counts control separate jobs and do not change this setting.
+
+Messages with overlapping conversation references are processed sequentially. When conversation identity cannot be established, processing stays sequential. Started work finishes before the mailbox lease is released, and existing message claims and saved progress continue to apply. This setting does not change the metadata importer.
+
 ## Persistent statistics and sender data
 
 The statistics importer saves email metadata, folder checkpoints, and the native message-ID inventory in PostgreSQL. Redis and browser caches are not the source of truth for these records. Restarting or replacing application containers resumes committed work using the same database. Initial imports show partial analytics and cleanup results while other folders continue.

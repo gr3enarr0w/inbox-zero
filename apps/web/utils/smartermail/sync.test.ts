@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { env } from "@/env";
 import prisma from "@/utils/__mocks__/prisma";
 import { createScopedLogger } from "@/utils/logger";
 import { smarterMailMessageId } from "./message";
@@ -13,6 +14,7 @@ import { enqueueBackgroundJob } from "@/utils/queue/dispatch";
 import { getSmarterMailSyncMessageKey } from "./sync-processing";
 
 vi.mock("server-only", () => ({}));
+vi.mock("@/env", () => ({ env: { SMARTERMAIL_SYNC_CONCURRENCY: 1 } }));
 vi.mock("@/utils/prisma");
 vi.mock("@/utils/queue/dispatch", () => ({ enqueueBackgroundJob: vi.fn() }));
 vi.mock("@/utils/email/provider", () => ({ createEmailProvider: vi.fn() }));
@@ -48,6 +50,7 @@ const message: ParsedMessage = {
 describe("SmarterMail polling", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    env.SMARTERMAIL_SYNC_CONCURRENCY = 1;
     prisma.smarterMailSyncState.updateMany.mockResolvedValue({ count: 1 });
     prisma.smarterMailSyncState.findUniqueOrThrow.mockResolvedValue({
       cursor: null,
@@ -623,4 +626,240 @@ describe("SmarterMail polling", () => {
       }),
     );
   });
+  it.each([
+    1, 2,
+  ])("limits overlapping rule execution to %i tasks", async (concurrency) => {
+    env.SMARTERMAIL_SYNC_CONCURRENCY = concurrency;
+    const messages = configureConcurrentMailbox(5);
+    let active = 0;
+    let maximum = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.mocked(runRules).mockImplementation(async () => {
+      active++;
+      maximum = Math.max(maximum, active);
+      await gate;
+      active--;
+      return [];
+    });
+    const sync = syncSmarterMailAccount("account", logger);
+    await vi.waitFor(() => expect(runRules).toHaveBeenCalledTimes(concurrency));
+    expect(maximum).toBe(concurrency);
+    release();
+    expect(await sync).toMatchObject({ processed: messages.length });
+    expect(maximum).toBe(concurrency);
+  });
+  it.each([
+    "resolved",
+    "unknown",
+  ])("serializes %s conversations despite distinct message thread IDs", async (kind) => {
+    env.SMARTERMAIL_SYNC_CONCURRENCY = 2;
+    const messages = configureConcurrentMailbox(2);
+    // Configure the same returned conversation, rather than relying on parsed threadId.
+    vi.mocked(createEmailProvider).mockResolvedValue({
+      getMessage: async (id: string) => messages.find((row) => row.id === id),
+      hasMessagesInFolder: async (_folder: string, ids: string[]) => ids,
+      getThread: async (id: string) => {
+        if (kind === "unknown") throw new Error("bounded history unavailable");
+        return { id, messages };
+      },
+    } as never);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.mocked(runRules).mockImplementationOnce(async () => {
+      await gate;
+      return [];
+    });
+    const sync = syncSmarterMailAccount("account", logger);
+    await vi.waitFor(() => expect(runRules).toHaveBeenCalledOnce());
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(runRules).toHaveBeenCalledOnce();
+    release();
+    expect(await sync).toMatchObject({ processed: 2 });
+  });
+  it("serializes messages sharing RFC references even when provider snapshots contain only their anchors", async () => {
+    env.SMARTERMAIL_SYNC_CONCURRENCY = 2;
+    const messages = configureConcurrentMailbox(2);
+    for (const row of messages) row.headers.references = "<root@example.com>";
+    let active = 0;
+    let maximum = 0;
+    vi.mocked(runRules).mockImplementation(async () => {
+      maximum = Math.max(maximum, ++active);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active--;
+      return [];
+    });
+    expect(await syncSmarterMailAccount("account", logger)).toMatchObject({
+      processed: 2,
+    });
+    expect(maximum).toBe(1);
+  });
+  it.each([
+    "bare@example.com",
+    "<valid@example.com> garbage",
+  ])("serializes messages with malformed conversation header %s", async (reference) => {
+    env.SMARTERMAIL_SYNC_CONCURRENCY = 2;
+    const messages = configureConcurrentMailbox(2);
+    messages[0].headers.references = reference;
+    messages[1].headers["in-reply-to"] = reference.replace("valid@", "other@");
+    let active = 0;
+    let maximum = 0;
+    vi.mocked(runRules).mockImplementation(async () => {
+      maximum = Math.max(maximum, ++active);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active--;
+      return [];
+    });
+    expect(await syncSmarterMailAccount("account", logger)).toMatchObject({
+      processed: 2,
+    });
+    expect(maximum).toBe(1);
+  });
+  it("re-reads dependent messages after a predecessor moves the conversation", async () => {
+    env.SMARTERMAIL_SYNC_CONCURRENCY = 2;
+    const messages = configureConcurrentMailbox(2);
+    let moved = false;
+    vi.mocked(createEmailProvider).mockResolvedValue({
+      getMessage: async (id: string) => messages.find((row) => row.id === id),
+      getThread: async (id: string) => ({ id, messages }),
+      hasMessagesInFolder: async (_folder: string, ids: string[]) =>
+        moved ? [] : ids,
+    } as never);
+    vi.mocked(runRules).mockImplementation(async () => {
+      moved = true;
+      return [];
+    });
+    expect(await syncSmarterMailAccount("account", logger)).toMatchObject({
+      processed: 1,
+    });
+    expect(runRules).toHaveBeenCalledOnce();
+    expect(prisma.smarterMailSyncMessage.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          messageKey: getSmarterMailSyncMessageKey(messages[1]),
+        }),
+        data: expect.objectContaining({ status: "skipped" }),
+      }),
+    );
+  });
+  it("does not claim prepared messages when conversation resolution exhausts the deadline", async () => {
+    env.SMARTERMAIL_SYNC_CONCURRENCY = 2;
+    const messages = configureConcurrentMailbox(2);
+    let clock = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => clock);
+    vi.mocked(createEmailProvider).mockResolvedValue({
+      getMessage: async (id: string) => messages.find((row) => row.id === id),
+      hasMessagesInFolder: async (_folder: string, ids: string[]) => ids,
+      getThread: async (id: string) => {
+        clock += 241_000;
+        return { id, messages };
+      },
+    } as never);
+    expect(await syncSmarterMailAccount("account", logger)).toMatchObject({
+      processed: 0,
+      hasMore: true,
+    });
+    expect(runRules).not.toHaveBeenCalled();
+    expect(
+      prisma.smarterMailSyncMessage.updateMany.mock.calls.some(
+        ([args]) => args.data.status === "claimed",
+      ),
+    ).toBe(false);
+  });
+  it("drains started actions before releasing a lease after a sibling task fails", async () => {
+    env.SMARTERMAIL_SYNC_CONCURRENCY = 2;
+    const messages = configureConcurrentMailbox(3);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.mocked(runRules).mockImplementation(async ({ message: current }) => {
+      if (current.id === messages[1].id) await gate;
+      return [];
+    });
+    vi.mocked(createEmailProvider).mockResolvedValue({
+      getMessage: async (id: string) => messages.find((row) => row.id === id),
+      getThread: async (id: string) => ({
+        id,
+        messages: messages.filter((row) => row.id === id),
+      }),
+      hasMessagesInFolder: async (_folder: string, ids: string[]) => {
+        if (ids[0] === messages[0].id && vi.mocked(runRules).mock.calls.length)
+          throw new Error("post-action read failed");
+        return ids;
+      },
+    } as never);
+    const sync = syncSmarterMailAccount("account", logger);
+    const result = sync.catch((error: Error) => error);
+    await vi.waitFor(() => expect(runRules).toHaveBeenCalledTimes(2));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(
+      prisma.smarterMailSyncState.updateMany.mock.calls.some(
+        ([args]) => args.data.leaseToken === null,
+      ),
+    ).toBe(false);
+    release();
+    expect(await result).toBeInstanceOf(Error);
+    expect(runRules).toHaveBeenCalledTimes(2);
+    expect(prisma.smarterMailSyncState.updateMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ leaseToken: null, failures: 1 }),
+      }),
+    );
+  });
+  it("leaves unstarted work queued when the admission deadline expires", async () => {
+    env.SMARTERMAIL_SYNC_CONCURRENCY = 2;
+    const messages = configureConcurrentMailbox(3);
+    let clock = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => clock);
+    vi.mocked(runRules).mockImplementation(async () => {
+      clock += 241_000;
+      return [];
+    });
+    expect(await syncSmarterMailAccount("account", logger)).toMatchObject({
+      hasMore: true,
+    });
+    expect(vi.mocked(runRules).mock.calls.length).toBeLessThanOrEqual(2);
+    expect(
+      prisma.smarterMailSyncMessage.updateMany.mock.calls.some(
+        ([args]) =>
+          args.where.messageKey === getSmarterMailSyncMessageKey(messages[2]),
+      ),
+    ).toBe(false);
+  });
 });
+
+function configureConcurrentMailbox(count: number) {
+  const messages = Array.from({ length: count }, (_, index) => ({
+    ...message,
+    id: smarterMailMessageId("Inbox", index + 1),
+    threadId: `message-${index}`,
+    headers: {
+      ...message.headers,
+      "message-id": `<concurrent-${index}@example.com>`,
+    },
+  }));
+  prisma.smarterMailSyncState.findUniqueOrThrow.mockResolvedValue({
+    cursor: "process",
+    failures: 0,
+  } as never);
+  prisma.smarterMailSyncMessage.findMany.mockResolvedValue(
+    messages.map((row) => ({
+      messageId: row.id,
+      messageKey: getSmarterMailSyncMessageKey(row),
+    })) as never,
+  );
+  vi.mocked(createEmailProvider).mockResolvedValue({
+    getMessage: async (id: string) => messages.find((row) => row.id === id),
+    hasMessagesInFolder: async (_folder: string, ids: string[]) => ids,
+    getThread: async (id: string) => ({
+      id,
+      messages: messages.filter((row) => row.id === id),
+    }),
+  } as never);
+  return messages;
+}
