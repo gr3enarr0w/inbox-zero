@@ -29,7 +29,11 @@ describe("safe SmarterMail retry", () => {
     expect(prisma.smarterMailSyncState.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { emailAccountId: "account", enabled: true },
-        data: expect.objectContaining({ cursor: null, failures: 0 }),
+        data: expect.objectContaining({
+          cursor: null,
+          failures: 0,
+          retryAt: null,
+        }),
       }),
     );
   });

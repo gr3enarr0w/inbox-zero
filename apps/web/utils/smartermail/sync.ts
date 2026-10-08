@@ -20,7 +20,6 @@ const LEASE_MS = 10 * 60 * 1000;
 export async function syncSmarterMailAccount(
   emailAccountId: string,
   logger: Logger,
-  reservedUntil?: Date,
 ) {
   const now = new Date();
   const leaseToken = randomUUID();
@@ -57,11 +56,7 @@ export async function syncSmarterMailAccount(
       },
       data: { status: "review_required", processedAt: now },
     });
-    if (
-      state.failures > 0 &&
-      state.nextRunAt > now &&
-      state.nextRunAt.getTime() !== reservedUntil?.getTime()
-    ) {
+    if (state.retryAt && state.retryAt > now) {
       await releaseLease(emailAccountId, leaseToken, {});
       return { skipped: true };
     }
@@ -233,6 +228,7 @@ export async function syncSmarterMailAccount(
     await releaseLease(emailAccountId, leaseToken, {
       cursor: nextCursor,
       failures: 0,
+      retryAt: null,
       lastSyncedAt: new Date(),
       nextRunAt: new Date(Date.now() + (nextCursor === null ? 60_000 : 0)),
     });
@@ -243,11 +239,13 @@ export async function syncSmarterMailAccount(
     };
   } catch {
     const failures = state.failures + 1;
+    const retryAt = new Date(
+      Date.now() + Math.min(60 * 60_000, 60_000 * 2 ** Math.min(failures, 6)),
+    );
     await releaseLease(emailAccountId, leaseToken, {
       failures,
-      nextRunAt: new Date(
-        Date.now() + Math.min(60 * 60_000, 60_000 * 2 ** Math.min(failures, 6)),
-      ),
+      nextRunAt: retryAt,
+      retryAt,
     });
     logger.warn("SmarterMail sync failed; retry scheduled", { failures });
     throw new Error(
@@ -263,6 +261,7 @@ async function releaseLease(
     enabled?: boolean;
     cursor?: string | null;
     failures?: number;
+    retryAt?: Date | null;
     lastSyncedAt?: Date;
     nextRunAt?: Date;
   },

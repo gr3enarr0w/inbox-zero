@@ -111,51 +111,61 @@ describe("SmarterMail polling", () => {
     );
   });
 
-  it("processes a due retry reserved by the dispatcher instead of skipping forever", async () => {
-    const state = { cursor: "process", failures: 1, nextRunAt: new Date(0) };
-    prisma.smarterMailSyncState.findMany.mockResolvedValue([
-      { emailAccountId: "account", nextRunAt: state.nextRunAt },
-    ] as never);
-    prisma.smarterMailSyncState.updateMany.mockImplementation(
-      async ({ data }) => {
-        if (data.nextRunAt instanceof Date) state.nextRunAt = data.nextRunAt;
-        return { count: 1 };
-      },
-    );
-    prisma.smarterMailSyncState.findUniqueOrThrow.mockResolvedValue(
-      state as never,
-    );
-    await enqueueDueSmarterMailSyncs(logger);
-    const body = vi.mocked(enqueueBackgroundJob).mock.lastCall![0].body as {
-      emailAccountId: string;
-      reservedUntil: string;
-    };
-    expect(body.reservedUntil).toEqual(state.nextRunAt.toISOString());
-    await syncSmarterMailAccount(
-      body.emailAccountId,
-      logger,
-      new Date(body.reservedUntil),
-    );
-    expect(runRules).toHaveBeenCalledOnce();
-    expect(prisma.smarterMailSyncState.updateMany).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          failures: 0,
-          lastSyncedAt: expect.any(Date),
+  it("processes an old queued delivery after dispatch reservation expired and was renewed", async () => {
+    vi.useFakeTimers();
+    try {
+      const initial = new Date("2026-10-08T12:00:00Z");
+      vi.setSystemTime(initial);
+      const state = {
+        cursor: "process",
+        failures: 1,
+        nextRunAt: new Date(0),
+        retryAt: new Date(0),
+      };
+      prisma.smarterMailSyncState.findMany.mockImplementation(
+        async () =>
+          [{ emailAccountId: "account", nextRunAt: state.nextRunAt }] as never,
+      );
+      prisma.smarterMailSyncState.updateMany.mockImplementation(
+        async ({ data }) => {
+          if (data.nextRunAt instanceof Date) state.nextRunAt = data.nextRunAt;
+          return { count: 1 };
+        },
+      );
+      prisma.smarterMailSyncState.findUniqueOrThrow.mockResolvedValue(
+        state as never,
+      );
+      await enqueueDueSmarterMailSyncs(logger);
+      const firstBody = vi.mocked(enqueueBackgroundJob).mock.lastCall![0]
+        .body as { emailAccountId: string };
+      vi.setSystemTime(new Date(initial.getTime() + 121_000));
+      await enqueueDueSmarterMailSyncs(logger);
+      expect(state.nextRunAt.getTime()).toBeGreaterThan(Date.now());
+      await syncSmarterMailAccount(firstBody.emailAccountId, logger);
+      expect(runRules).toHaveBeenCalledOnce();
+      expect(prisma.smarterMailSyncState.updateMany).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            failures: 0,
+            retryAt: null,
+            lastSyncedAt: expect.any(Date),
+          }),
         }),
-      }),
-    );
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
-  it("preserves genuine failure backoff for replay of an older dispatch reservation", async () => {
-    const reservedUntil = new Date(Date.now() + 60_000);
+  it("preserves genuine retry backoff for an older queued delivery", async () => {
     prisma.smarterMailSyncState.findUniqueOrThrow.mockResolvedValue({
       cursor: "process",
       failures: 2,
-      nextRunAt: new Date(Date.now() + 240_000),
+      nextRunAt: new Date(0),
+      retryAt: new Date(Date.now() + 240_000),
     } as never);
-    expect(
-      await syncSmarterMailAccount("account", logger, reservedUntil),
-    ).toEqual({ skipped: true });
+    expect(await syncSmarterMailAccount("account", logger)).toEqual({
+      skipped: true,
+    });
     expect(createEmailProvider).not.toHaveBeenCalled();
     expect(runRules).not.toHaveBeenCalled();
   });
@@ -271,9 +281,16 @@ describe("SmarterMail polling", () => {
     );
     expect(prisma.smarterMailSyncState.updateMany).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ failures: 1, leaseToken: null }),
+        data: expect.objectContaining({
+          failures: 1,
+          retryAt: expect.any(Date),
+          leaseToken: null,
+        }),
       }),
     );
+    const failed =
+      prisma.smarterMailSyncState.updateMany.mock.lastCall![0].data;
+    expect(failed.retryAt).toEqual(failed.nextRunAt);
     expect(runRules).not.toHaveBeenCalled();
   });
 

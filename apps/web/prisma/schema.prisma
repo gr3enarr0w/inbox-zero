@@ -2821,6 +2821,7 @@ model SmarterMailSyncState {
   cursor String?
   failures Int @default(0)
   nextRunAt DateTime @default(now())
+  retryAt DateTime?
   leaseUntil DateTime?
   leaseToken String?
   lastSyncedAt DateTime?

@@ -6,7 +6,6 @@ import { syncSmarterMailAccount } from "@/utils/smartermail/sync";
 
 const bodySchema = z.object({
   emailAccountId: z.string().min(1),
-  reservedUntil: z.string().datetime().optional(),
 });
 
 export const maxDuration = 300;
@@ -21,7 +20,6 @@ export const POST = withError("smartermail/sync", async (request) => {
     await syncSmarterMailAccount(
       body.data.emailAccountId,
       request.logger.with({ emailAccountId: body.data.emailAccountId }),
-      body.data.reservedUntil ? new Date(body.data.reservedUntil) : undefined,
     ),
   );
 });

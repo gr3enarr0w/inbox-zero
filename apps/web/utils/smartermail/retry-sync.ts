@@ -26,7 +26,7 @@ export async function retrySmarterMailSyncMessage(
     );
   await prisma.smarterMailSyncState.updateMany({
     where: { emailAccountId, enabled: true },
-    data: { cursor: null, failures: 0, nextRunAt: new Date() },
+    data: { cursor: null, failures: 0, nextRunAt: new Date(), retryAt: null },
   });
   return { retried: result.count };
 }

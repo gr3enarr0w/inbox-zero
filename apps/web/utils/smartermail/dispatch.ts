@@ -18,7 +18,6 @@ export async function enqueueDueSmarterMailSyncs(logger: Logger) {
     take: 50,
   });
   let queued = 0;
-  const reservedUntil = new Date(now.getTime() + 60_000);
   for (const state of states) {
     // Reserve dispatch briefly; workers take their own fenced processing lease.
     const claim = await prisma.smarterMailSyncState.updateMany({
@@ -27,16 +26,13 @@ export async function enqueueDueSmarterMailSyncs(logger: Logger) {
         enabled: true,
         nextRunAt: state.nextRunAt,
       },
-      data: { nextRunAt: reservedUntil },
+      data: { nextRunAt: new Date(now.getTime() + 60_000) },
     });
     if (!claim.count) continue;
     try {
       await enqueueBackgroundJob({
         topic: "smartermail-sync",
-        body: {
-          emailAccountId: state.emailAccountId,
-          reservedUntil: reservedUntil.toISOString(),
-        },
+        body: { emailAccountId: state.emailAccountId },
         qstash: {
           queueName: "smartermail-sync",
           parallelism: 1,
