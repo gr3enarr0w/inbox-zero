@@ -12,6 +12,7 @@ export async function getSenders({
   return prisma.emailMessage.findMany({
     where: {
       emailAccountId,
+      removedAt: null,
       sent: false,
     },
     select: {

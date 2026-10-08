@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback } from "react";
 import type { DateRange } from "react-day-picker";
 import { subDays } from "date-fns/subDays";
 import { EmailAnalytics } from "@/app/(app)/[emailAccountId]/stats/EmailAnalytics";
 import { StatsSummary } from "@/app/(app)/[emailAccountId]/stats/StatsSummary";
 import { StatsOnboarding } from "@/app/(app)/[emailAccountId]/stats/StatsOnboarding";
+import { EmailStatsPreloader } from "@/components/EmailStatsPreloader";
 import { useStatLoader } from "@/providers/StatLoaderProvider";
 import { EmailActionsAnalytics } from "@/app/(app)/[emailAccountId]/stats/EmailActionsAnalytics";
 import { RuleStatsChart } from "./RuleStatsChart";
@@ -69,14 +70,8 @@ export function Stats() {
     [analytics, period],
   );
 
-  const { isLoading, onLoad } = useStatLoader();
+  const { isLoading } = useStatLoader();
   const refreshInterval = isLoading ? 5000 : 1_000_000;
-  useEffect(() => {
-    // Skip stat loading when viewing someone else's account
-    if (isAccountOwner) {
-      onLoad({ loadBefore: false, showToast: false });
-    }
-  }, [onLoad, isAccountOwner]);
 
   const title =
     !isAccountOwner && accountInfo?.name
@@ -86,6 +81,7 @@ export function Stats() {
   return (
     <PageWrapper>
       <PageHeading>{title}</PageHeading>
+      {isAccountOwner && <EmailStatsPreloader />}
       <ActionBar className="mt-6" rightContent={<LoadStatsButton />}>
         <DatePickerWithRange
           dateRange={dateRange}

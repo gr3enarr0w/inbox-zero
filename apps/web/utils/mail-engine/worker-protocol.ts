@@ -3,7 +3,7 @@ import type { QuerySnapshot } from "@inboxzero/mail-core/queries";
 
 export type BrowserEngineStart = {
   accountId: string;
-  provider: "google" | "microsoft" | "smartermail";
+  provider: "google" | "microsoft" | "smartermail" | "thunderbird";
   generation?: string;
   persist?: boolean;
   maxPendingOperations?: number;

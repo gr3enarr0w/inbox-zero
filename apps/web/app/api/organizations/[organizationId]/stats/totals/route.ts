@@ -38,7 +38,7 @@ async function getTotals({
         SELECT COUNT(*)
         FROM "EmailMessage" em
         JOIN "Member" m ON m."emailAccountId" = em."emailAccountId"
-        WHERE ${memberFilter} AND em.sent = false${emailDateClause}
+        WHERE ${memberFilter} AND em."removedAt" IS NULL AND em.sent = false${emailDateClause}
       ) as total_emails,
       (
         SELECT COUNT(*)

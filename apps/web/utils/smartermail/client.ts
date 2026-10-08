@@ -9,10 +9,16 @@ export class SmarterMailClient extends SmarterMailAuthentication {
   async request(
     operation: SmarterMailOperation,
     body?: Record<string, unknown>,
+    pathParameters?: Record<string, string>,
   ): Promise<unknown> {
     const identityVersion = this.beginRequest();
     try {
-      return await this.requestForIdentity(operation, body, identityVersion);
+      return await this.requestForIdentity(
+        operation,
+        body,
+        identityVersion,
+        pathParameters,
+      );
     } finally {
       this.endRequest();
     }
@@ -22,11 +28,13 @@ export class SmarterMailClient extends SmarterMailAuthentication {
     operation: SmarterMailOperation,
     body: Record<string, unknown> | undefined,
     identityVersion: number,
+    pathParameters?: Record<string, string>,
   ): Promise<unknown> {
     if (!Object.hasOwn(operations, operation)) {
       throw new SmarterMailApiError("Unknown SmarterMail operation");
     }
     const spec = operations[operation];
+    const path = resolveOperationPath(spec.path, pathParameters);
     if (!this.tokens) {
       throw new SmarterMailApiError("SmarterMail account is not authenticated");
     }
@@ -42,7 +50,7 @@ export class SmarterMailClient extends SmarterMailAuthentication {
     let payload: unknown;
     try {
       payload = await this.transport.request(
-        spec.path,
+        path,
         spec.method,
         body,
         accessToken,
@@ -60,7 +68,7 @@ export class SmarterMailClient extends SmarterMailAuthentication {
       else if (this.refreshPromise) await this.refreshPromise;
       this.assertIdentity(identityVersion);
       payload = await this.transport.request(
-        spec.path,
+        path,
         spec.method,
         body,
         this.tokens.accessToken,
@@ -70,4 +78,38 @@ export class SmarterMailClient extends SmarterMailAuthentication {
     this.assertIdentity(identityVersion);
     return payload;
   }
+}
+
+function resolveOperationPath(
+  template: string,
+  parameters: Record<string, string> = {},
+) {
+  const required = [...template.matchAll(/:([A-Za-z][A-Za-z0-9]*)/g)].map(
+    (match) => match[1]!,
+  );
+  if (
+    Object.keys(parameters).some((key) => !required.includes(key)) ||
+    required.some((key) => {
+      const value = parameters[key];
+      return (
+        !Object.hasOwn(parameters, key) ||
+        typeof value !== "string" ||
+        !value ||
+        value === "." ||
+        value === ".." ||
+        /[\\/]/.test(value) ||
+        [...value].some((character) => {
+          const code = character.charCodeAt(0);
+          return code < 32 || code === 127;
+        })
+      );
+    })
+  ) {
+    throw new SmarterMailApiError(
+      "Invalid SmarterMail operation path parameters",
+    );
+  }
+  return template.replace(/:([A-Za-z][A-Za-z0-9]*)/g, (_, key: string) =>
+    encodeURIComponent(parameters[key]!),
+  );
 }

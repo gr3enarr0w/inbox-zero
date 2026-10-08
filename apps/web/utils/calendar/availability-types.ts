@@ -18,5 +18,5 @@ export interface CalendarAvailabilityProvider {
     timeMax: string;
     failOnCalendarError?: boolean;
   }): Promise<BusyPeriod[]>;
-  name: "google" | "microsoft";
+  name: "google" | "microsoft" | "smartermail";
 }

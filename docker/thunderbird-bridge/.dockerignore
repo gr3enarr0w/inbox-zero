@@ -1,0 +1,4 @@
+secrets
+*.xpi
+extension/config.json
+*.test.mjs

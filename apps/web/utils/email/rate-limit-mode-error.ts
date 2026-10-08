@@ -19,6 +19,11 @@ const EMAIL_PROVIDER_RATE_LIMIT_METADATA = {
     messageProviderLabel: "Microsoft",
     bannerProviderLabel: "Microsoft Outlook",
   },
+  thunderbird: {
+    apiErrorType: "Thunderbird Rate Limit",
+    messageProviderLabel: "Thunderbird",
+    bannerProviderLabel: "Thunderbird",
+  },
   smartermail: {
     apiErrorType: "SmarterMail Rate Limit",
     messageProviderLabel: "SmarterMail",
@@ -56,7 +61,8 @@ export function toRateLimitProvider(
   if (
     provider === "google" ||
     provider === "microsoft" ||
-    provider === "smartermail"
+    provider === "smartermail" ||
+    provider === "thunderbird"
   )
     return provider;
   return null;

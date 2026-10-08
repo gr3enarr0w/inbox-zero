@@ -5,120 +5,115 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
 } from "react";
-import { toastError, toastSuccess } from "@/components/Toast";
-import { isError } from "@/utils/error";
+import { useSWRConfig } from "swr";
+import { toastSuccess } from "@/components/Toast";
 import { loadEmailStatsAction } from "@/utils/actions/stats";
 import { useAccount } from "@/providers/EmailAccountProvider";
+import {
+  StatsLoader,
+  isStatsImportCacheKey,
+  type StatLoaderState,
+} from "@/providers/stat-loader";
 
-type Context = {
-  isLoading: boolean;
-  onLoad: (options: {
-    loadBefore: boolean;
-    showToast: boolean;
-  }) => Promise<void>;
-  onLoadBatch: (options: {
-    loadBefore: boolean;
-    showToast: boolean;
-  }) => Promise<void>;
+type Options = { loadBefore: boolean; showToast: boolean };
+type Context = StatLoaderState & {
+  onLoad: (options: Options) => Promise<void>;
+  onLoadBatch: (options: Options) => Promise<void>;
   onCancelLoadBatch: () => void;
 };
-
-const StatLoaderContext = createContext<Context>({
+const initialState: StatLoaderState = {
   isLoading: false,
+  error: null,
+  progress: null,
+};
+const StatLoaderContext = createContext<Context>({
+  ...initialState,
   onLoad: async () => {},
   onLoadBatch: async () => {},
   onCancelLoadBatch: () => {},
 });
-
 export const useStatLoader = () => useContext(StatLoaderContext);
 
-class StatLoader {
-  #isLoading = false;
-
-  async loadStats({
-    emailAccountId,
-    loadBefore,
-    showToast,
-  }: {
-    emailAccountId: string;
-    loadBefore: boolean;
-    showToast: boolean;
-  }) {
-    if (this.#isLoading) return;
-
-    this.#isLoading = true;
-
-    const res = await loadEmailStatsAction(emailAccountId, { loadBefore });
-
-    if (showToast) {
-      if (isError(res)) {
-        toastError({ description: "Error loading stats." });
-      } else {
-        toastSuccess({ description: "Stats loaded!" });
-      }
-    }
-
-    this.#isLoading = false;
-  }
-}
-
-const statLoader = new StatLoader();
-
 export function StatLoaderProvider(props: { children: React.ReactNode }) {
-  const [isLoading, setIsLoading] = useState(false);
-  const [stopLoading, setStopLoading] = useState(false);
+  const [states, setStates] = useState<Record<string, StatLoaderState>>({});
   const { emailAccountId } = useAccount();
-
+  const currentAccountId = useRef(emailAccountId);
+  currentAccountId.current = emailAccountId;
+  const { mutate } = useSWRConfig();
+  const loader = useRef<StatsLoader | null>(null);
+  if (!loader.current)
+    loader.current = new StatsLoader(
+      loadEmailStatsAction,
+      (accountId, update) => {
+        setStates((previous) => ({
+          ...previous,
+          [accountId]: { ...(previous[accountId] ?? initialState), ...update },
+        }));
+        if (update.progress && currentAccountId.current === accountId) {
+          mutate((key) => isStatsImportCacheKey(key, accountId)).catch(
+            () => undefined,
+          );
+        }
+      },
+    );
+  useEffect(() => {
+    loader.current!.cancelOtherAccounts(emailAccountId);
+  }, [emailAccountId]);
   const onLoad = useCallback(
-    async (options: { loadBefore: boolean; showToast: boolean }) => {
-      setIsLoading(true);
-      await statLoader.loadStats({
+    async (options: Options) => {
+      const complete = await loader.current!.load(
         emailAccountId,
-        loadBefore: options.loadBefore,
-        showToast: options.showToast,
-      });
-      setIsLoading(false);
+        options.loadBefore,
+      );
+      if (
+        complete &&
+        options.showToast &&
+        currentAccountId.current === emailAccountId
+      )
+        toastSuccess({ description: "Mailbox import finished." });
     },
     [emailAccountId],
   );
-
   const onLoadBatch = useCallback(
-    async (options: { loadBefore: boolean; showToast: boolean }) => {
-      const batchSize = 50;
-      for (let i = 0; i < batchSize; i++) {
-        if (stopLoading) break;
-        console.log("Loading batch", i);
-        await onLoad({
-          ...options,
-          showToast: options.showToast && i === batchSize - 1,
-        });
-      }
-      setStopLoading(false);
+    async (options: Options) => {
+      const complete = await loader.current!.load(
+        emailAccountId,
+        options.loadBefore,
+        50,
+      );
+      if (
+        complete &&
+        options.showToast &&
+        currentAccountId.current === emailAccountId
+      )
+        toastSuccess({ description: "Mailbox import finished." });
     },
-    [onLoad, stopLoading],
+    [emailAccountId],
   );
-
   const onCancelLoadBatch = useCallback(() => {
-    setStopLoading(true);
-  }, []);
-
+    loader.current!.cancel(emailAccountId);
+  }, [emailAccountId]);
   return (
     <StatLoaderContext.Provider
-      value={{ isLoading, onLoad, onLoadBatch, onCancelLoadBatch }}
+      value={{
+        ...(states[emailAccountId] ?? initialState),
+        onLoad,
+        onLoadBatch,
+        onCancelLoadBatch,
+      }}
     >
       {props.children}
     </StatLoaderContext.Provider>
   );
 }
 
-export function LoadStats(props: { loadBefore: boolean; showToast: boolean }) {
+export function LoadStats({ loadBefore, showToast }: Options) {
   const { onLoad } = useStatLoader();
-
   useEffect(() => {
-    onLoad(props);
-  }, [onLoad, props]);
-
+    onLoad({ loadBefore, showToast });
+  }, [onLoad, loadBefore, showToast]);
   return null;
 }

@@ -34,7 +34,7 @@ async function getEmailStatsByPeriod(
   };
 
   // Create WHERE clause properly
-  const whereClause = Prisma.sql`WHERE "emailAccountId" = ${emailAccountId}`;
+  const whereClause = Prisma.sql`WHERE "emailAccountId" = ${emailAccountId} AND "removedAt" IS NULL`;
   const dateClause =
     dateConditions.length > 0
       ? Prisma.sql` AND ${Prisma.join(dateConditions, " AND ")}`

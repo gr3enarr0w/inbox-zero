@@ -4,7 +4,9 @@ import { withError } from "@/utils/middleware";
 import { isValidInternalApiKey } from "@/utils/internal-api";
 import { syncSmarterMailAccount } from "@/utils/smartermail/sync";
 
-const bodySchema = z.object({ emailAccountId: z.string().min(1) });
+const bodySchema = z.object({
+  emailAccountId: z.string().min(1),
+});
 
 export const maxDuration = 300;
 

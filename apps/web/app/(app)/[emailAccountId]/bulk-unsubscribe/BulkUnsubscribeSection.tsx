@@ -41,6 +41,7 @@ import {
   isUnsubscribeSuggestion,
 } from "@/app/(app)/[emailAccountId]/bulk-unsubscribe/suggestions";
 import { getUserFacingUnsubscribeLink } from "@/utils/parse/unsubscribe";
+import { EmailStatsPreloader } from "@/components/EmailStatsPreloader";
 import { useStatLoader } from "@/providers/StatLoaderProvider";
 import { usePremiumModal } from "@/app/(app)/premium/PremiumModal";
 import { useLabels } from "@/hooks/useLabels";
@@ -152,11 +153,12 @@ export function BulkUnsubscribe() {
     to: now,
   });
 
-  const { isLoading: isStatsLoaderLoading, onLoad } = useStatLoader();
+  const {
+    isLoading: isStatsLoaderLoading,
+    error: statsImportError,
+    progress: statsImportProgress,
+  } = useStatLoader();
   const refreshInterval = isStatsLoaderLoading ? 5000 : 1_000_000;
-  useEffect(() => {
-    onLoad({ loadBefore: false, showToast: false });
-  }, [onLoad]);
 
   const { emailAccountId, userEmail } = useAccount();
 
@@ -395,6 +397,7 @@ export function BulkUnsubscribe() {
 
   return (
     <PageWrapper>
+      <EmailStatsPreloader />
       <div className="flex items-start justify-between gap-4">
         <PageHeader
           title="Bulk Unsubscriber"
@@ -569,6 +572,10 @@ export function BulkUnsubscribe() {
                 isSomeSelected={isSomeVisibleSelected}
                 onToggleSelectAll={onToggleSelectAllVisible}
               />
+            ) : statsImportError || statsImportProgress?.complete !== true ? (
+              <p className="p-6 text-sm text-muted-foreground">
+                Results may be incomplete until the email import finishes.
+              </p>
             ) : (
               <EmptyState
                 isReviewView={filter === "unhandled" && !search}

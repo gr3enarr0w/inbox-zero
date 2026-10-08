@@ -21,6 +21,7 @@ import {
   normalizeActionExecutionError,
   persistExecutedActionOutcome,
 } from "@/utils/ai/executed-action-outcome";
+import { isThunderbirdProvider } from "@/utils/email/provider-types";
 import { isSendingActionType } from "@/utils/ai/sending-action";
 
 const MODULE = "ai-execute-act";
@@ -58,7 +59,18 @@ export async function executeAct({
 
   const actionFailures: ActionFailure[] = [];
 
-  for (const action of executedRule.actionItems) {
+  // Native Thunderbird filing moves messages and invalidates the original draft reference.
+  const actionItems = isThunderbirdProvider(client.name)
+    ? [
+        ...executedRule.actionItems.filter(
+          (action) => action.type === ActionType.DRAFT_EMAIL,
+        ),
+        ...executedRule.actionItems.filter(
+          (action) => action.type !== ActionType.DRAFT_EMAIL,
+        ),
+      ]
+    : executedRule.actionItems;
+  for (const action of actionItems) {
     try {
       if (
         shouldSkipAutomatedArchiveForSender({

@@ -1,3 +1,4 @@
+import { createSmarterMailAvailabilityProvider } from "@/utils/calendar/providers/smartermail-availability";
 import { TZDate } from "@date-fns/tz";
 import { startOfDay, endOfDay, format } from "date-fns";
 import type { Logger } from "@/utils/logger";
@@ -145,6 +146,35 @@ export async function getUnifiedCalendarAvailability({
             error,
             connectionId: connection.id,
             ...getCalendarAvailabilityErrorLogContext(error),
+          });
+          if (failClosed) throw error;
+          return [];
+        }),
+    );
+  }
+
+  for (const connection of calendarConnections.filter(
+    (connection) => connection.provider === "smartermail",
+  )) {
+    const calendarIds = connection.calendars.map(
+      (calendar) => calendar.calendarId,
+    );
+    if (!calendarIds.length) continue;
+    promises.push(
+      createSmarterMailAvailabilityProvider()
+        .fetchBusyPeriods({
+          emailAccountId,
+          calendarIds,
+          timeMin,
+          timeMax,
+          refreshToken: null,
+          expiresAt: null,
+          failOnCalendarError: failClosed,
+        })
+        .catch((error) => {
+          logger.error("Error fetching SmarterMail calendar availability", {
+            error,
+            connectionId: connection.id,
           });
           if (failClosed) throw error;
           return [];

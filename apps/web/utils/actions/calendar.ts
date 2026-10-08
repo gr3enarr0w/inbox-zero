@@ -9,6 +9,7 @@ import {
 } from "@/utils/actions/calendar.validation";
 import prisma from "@/utils/prisma";
 import { SafeError } from "@/utils/error";
+import { syncSmarterMailCalendars } from "@/utils/calendar/providers/smartermail-calendars";
 
 export const disconnectCalendarAction = actionClient
   .metadata({ name: "disconnectCalendar" })
@@ -89,4 +90,11 @@ export const updateCalendarBookingLinkAction = actionClient
       where: { id: emailAccountId },
       data: { calendarBookingLink: bookingLink || null },
     });
+  });
+
+export const connectSmarterMailCalendarAction = actionClient
+  .metadata({ name: "connectSmarterMailCalendar" })
+  .action(async ({ ctx: { emailAccountId, userId } }) => {
+    await syncSmarterMailCalendars({ emailAccountId, userId });
+    return { success: true };
   });

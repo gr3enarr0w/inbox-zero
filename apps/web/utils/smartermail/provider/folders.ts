@@ -9,11 +9,14 @@ import { SmarterMailProviderBase } from "@/utils/smartermail/provider/base";
 import { folderSchema } from "@/utils/smartermail/provider/schemas";
 
 export class SmarterMailFoldersProvider extends SmarterMailProviderBase {
-  async getFolders(): Promise<OutlookFolder[]> {
+  private async ownedFolders() {
     const payload = z
       .object({ folderList: z.array(folderSchema) })
       .parse(await this.client.request("folders"));
-    return flattenFolders(payload.folderList).map((folder) => {
+    return flattenFolders(payload.folderList);
+  }
+  async getFolders(): Promise<OutlookFolder[]> {
+    return (await this.ownedFolders()).map((folder) => {
       const path = folder.path ?? folder.folder ?? folder.name;
       if (!path) throw new Error("SmarterMail folder has no path");
       return {
@@ -25,6 +28,25 @@ export class SmarterMailFoldersProvider extends SmarterMailProviderBase {
         systemType: smarterMailFolderRole(path) as
           | OutlookSystemFolder
           | undefined,
+      };
+    });
+  }
+  async getStatsFolders() {
+    return (await this.ownedFolders()).map((folder) => {
+      const metadata = z
+        .object({
+          guid: z.string().min(1).optional(),
+          changeNumber: z.number().int().nonnegative().optional(),
+          totalMessages: z.number().int().nonnegative().optional(),
+        })
+        .parse(folder);
+      const id = folder.path ?? folder.folder ?? folder.name;
+      if (!id) throw new Error("SmarterMail folder has no path");
+      return {
+        id,
+        guid: metadata.guid,
+        changeNumber: metadata.changeNumber,
+        total: metadata.totalMessages,
       };
     });
   }

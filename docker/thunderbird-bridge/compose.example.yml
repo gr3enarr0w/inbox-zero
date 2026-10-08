@@ -1,0 +1,23 @@
+services:
+  thunderbird-bridge:
+    image: ${BRIDGE_IMAGE:?Set a built immutable bridge image ID}
+    network_mode: container:thunderbird-private
+    restart: unless-stopped
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 32
+    environment:
+      BRIDGE_TOKEN_FILE: /run/secrets/bridge-token
+      OPERATOR_TOKEN_FILE: /run/secrets/operator-token
+      THUNDERBIRD_ACCOUNT_ID: ${THUNDERBIRD_ACCOUNT_ID:?Set the single account selected in Thunderbird}
+    volumes:
+      - ${BRIDGE_SECRET_DIR:?Set the private directory outside the repository}:/run/secrets:ro
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:8787/health',{signal:AbortSignal.timeout(2000)}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 3s
+      retries: 3

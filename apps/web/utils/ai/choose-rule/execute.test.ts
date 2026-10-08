@@ -83,6 +83,68 @@ describe("executeAct", () => {
     mockExecutedRuleUpdate.mockResolvedValue({});
   });
 
+  it("creates Thunderbird reply drafts before a label move invalidates the original native ID", async () => {
+    let moved = false;
+    mockRunActionFunction.mockImplementation(async ({ action }) => {
+      if (action.type === ActionType.LABEL) moved = true;
+      if (action.type === ActionType.DRAFT_EMAIL) {
+        if (moved) throw new Error("Original message ID was moved");
+        return { draftId: "saved-draft" };
+      }
+      return { success: true };
+    });
+    const actionItems = [
+      { id: "label", type: ActionType.LABEL },
+      { id: "star", type: ActionType.STAR },
+      { id: "draft", type: ActionType.DRAFT_EMAIL },
+      { id: "read", type: ActionType.MARK_READ },
+    ];
+    const result = await executeAct({
+      client: { name: "thunderbird" } as EmailProvider,
+      executedRule: { ...baseExecutedRule, actionItems } as any,
+      message,
+      emailAccount,
+      logger,
+    });
+    expect(result).toBe(ExecutedRuleStatus.APPLIED);
+    expect(
+      mockRunActionFunction.mock.calls.map(([input]) => input.action.id),
+    ).toEqual(["draft", "label", "star", "read"]);
+    expect(actionItems.map((action) => action.id)).toEqual([
+      "label",
+      "star",
+      "draft",
+      "read",
+    ]);
+  });
+  it.each([
+    "google",
+    "microsoft",
+    "smartermail",
+  ] as const)("preserves existing %s action order", async (name) => {
+    mockRunActionFunction.mockImplementation(async ({ action }) =>
+      action.type === ActionType.DRAFT_EMAIL
+        ? { draftId: "saved-draft" }
+        : { success: true },
+    );
+    await executeAct({
+      client: { name } as EmailProvider,
+      executedRule: {
+        ...baseExecutedRule,
+        actionItems: [
+          { id: "label", type: ActionType.LABEL },
+          { id: "draft", type: ActionType.DRAFT_EMAIL },
+          { id: "star", type: ActionType.STAR },
+        ],
+      } as any,
+      message,
+      emailAccount,
+      logger,
+    });
+    expect(
+      mockRunActionFunction.mock.calls.map(([input]) => input.action.id),
+    ).toEqual(["label", "draft", "star"]);
+  });
   it("persists provider message IDs returned by sending actions", async () => {
     mockRunActionFunction.mockResolvedValueOnce({
       sentMessageIds: ["sent-message-1"],

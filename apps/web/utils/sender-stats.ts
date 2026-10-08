@@ -71,6 +71,7 @@ export async function getSenderEmailStats(
 
   whereConditions.push(
     Prisma.sql`"emailAccountId" = ${options.emailAccountId}`,
+    Prisma.sql`"removedAt" IS NULL`,
     Prisma.sql`sent = false`,
     Prisma.sql`draft = false`,
     // Sent mail can lose the SENT label (e.g. moved out of Outlook's Sent Items)

@@ -199,6 +199,7 @@ async function getWritableCalendar({
       connection: {
         emailAccountId,
         isConnected: true,
+        provider: { in: ["google", "microsoft"] },
       },
     },
     orderBy: [{ primary: "desc" }, { createdAt: "asc" }],

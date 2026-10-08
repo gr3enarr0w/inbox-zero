@@ -31,7 +31,7 @@ async function getEmailVolumeBuckets({
     SELECT em."emailAccountId", COUNT(*) as email_count
     FROM "EmailMessage" em
     JOIN "Member" m ON m."emailAccountId" = em."emailAccountId"
-    WHERE ${memberFilter} AND em.sent = false${dateClause}
+    WHERE ${memberFilter} AND em."removedAt" IS NULL AND em.sent = false${dateClause}
     GROUP BY em."emailAccountId"
   `;
 

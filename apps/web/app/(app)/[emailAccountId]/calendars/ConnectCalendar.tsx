@@ -1,11 +1,15 @@
 "use client";
 
 import { useState } from "react";
+import { CalendarIcon } from "lucide-react";
+import { useAction } from "next-safe-action/hooks";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { useAccount } from "@/providers/EmailAccountProvider";
 import { toastError } from "@/components/Toast";
-import { captureException } from "@/utils/error";
+import { captureException, getActionErrorMessage } from "@/utils/error";
+import { connectSmarterMailCalendarAction } from "@/utils/actions/calendar";
+import { useCalendars } from "@/hooks/useCalendars";
 import type { GetCalendarAuthUrlResponse } from "@/app/api/google/calendar/auth-url/route";
 import { fetchWithAccount } from "@/utils/fetch";
 import { CALENDAR_ONBOARDING_RETURN_COOKIE } from "@/utils/calendar/constants";
@@ -20,10 +24,27 @@ export function ConnectCalendar({
   analyticsPage?: AppPage;
   onboardingReturnPath?: string;
 }) {
-  const { emailAccountId } = useAccount();
+  const { emailAccountId, provider } = useAccount();
+  const { mutate } = useCalendars();
   const analytics = useProductAnalytics(analyticsPage);
   const [isConnectingGoogle, setIsConnectingGoogle] = useState(false);
   const [isConnectingMicrosoft, setIsConnectingMicrosoft] = useState(false);
+
+  const { execute: connectSmarterMail, isExecuting: isConnectingSmarterMail } =
+    useAction(connectSmarterMailCalendarAction.bind(null, emailAccountId), {
+      onSuccess: async () => {
+        await mutate();
+        if (onboardingReturnPath) redirectToSafeUrl(onboardingReturnPath);
+      },
+      onError: ({ error }) => {
+        analytics.captureAction("calendar_connect_start_failed", {
+          provider: "smartermail",
+        });
+        toastError({ description: getActionErrorMessage(error) });
+      },
+    });
+  const isConnecting =
+    isConnectingGoogle || isConnectingMicrosoft || isConnectingSmarterMail;
 
   const setOnboardingReturnCookie = () => {
     if (onboardingReturnPath) {
@@ -103,9 +124,29 @@ export function ConnectCalendar({
 
   return (
     <div className="flex gap-2 flex-wrap md:flex-nowrap">
+      {provider === "smartermail" && (
+        <Button
+          onClick={() => {
+            analytics.captureAction("calendar_connect_started", {
+              provider: "smartermail",
+              has_onboarding_return_path: Boolean(onboardingReturnPath),
+            });
+            connectSmarterMail();
+          }}
+          disabled={isConnecting}
+          variant="outline"
+          className="flex items-center gap-2 w-full md:w-auto"
+        >
+          <CalendarIcon className="size-4" />
+          {isConnectingSmarterMail
+            ? "Connecting..."
+            : "Add SmarterMail Calendar"}
+        </Button>
+      )}
+
       <Button
         onClick={handleConnectGoogle}
-        disabled={isConnectingGoogle || isConnectingMicrosoft}
+        disabled={isConnecting}
         variant="outline"
         className="flex items-center gap-2 w-full md:w-auto"
       >
@@ -121,7 +162,7 @@ export function ConnectCalendar({
 
       <Button
         onClick={handleConnectMicrosoft}
-        disabled={isConnectingGoogle || isConnectingMicrosoft}
+        disabled={isConnecting}
         variant="outline"
         className="flex items-center gap-2 w-full md:w-auto"
       >

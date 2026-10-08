@@ -1,3 +1,5 @@
+import { ThunderbirdProvider } from "@/utils/email/thunderbird";
+import { getThunderbirdClientForEmail } from "@/utils/thunderbird/account";
 import { getSmarterMailClientForEmail } from "@/utils/smartermail/account";
 import { SmarterMailProvider } from "@/utils/email/smartermail";
 import {
@@ -37,6 +39,14 @@ export async function createEmailProvider({
       const client = await getGmailClientForEmail({ emailAccountId, logger });
       return withProviderFailureLogging(
         new GmailProvider(client, logger, emailAccountId),
+        { emailAccountId, provider: rateLimitProvider, logger },
+      );
+    }
+
+    if (rateLimitProvider === "thunderbird") {
+      const client = await getThunderbirdClientForEmail({ emailAccountId });
+      return withProviderFailureLogging(
+        new ThunderbirdProvider(client, logger, emailAccountId),
         { emailAccountId, provider: rateLimitProvider, logger },
       );
     }

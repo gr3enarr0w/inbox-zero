@@ -1,3 +1,4 @@
+import { SmarterMailCalendarEventProvider } from "@/utils/calendar/providers/smartermail-events";
 import { SafeError } from "@/utils/error";
 import prisma from "@/utils/prisma";
 import type { Logger } from "@/utils/logger";
@@ -96,6 +97,13 @@ export function createCalendarEventProvider({
     emailAccountId,
   };
 
+  if (connection.provider === "smartermail") {
+    return new SmarterMailCalendarEventProvider(
+      { emailAccountId, connectionId: connection.id },
+      logger,
+    );
+  }
+
   if (isGoogleProvider(connection.provider)) {
     return new GoogleCalendarEventProvider(providerParams, logger);
   }
@@ -111,6 +119,7 @@ function isUsableCalendarConnection(connection: {
   provider: string;
   refreshToken: string | null;
 }) {
+  if (connection.provider === "smartermail") return true;
   if (!connection.refreshToken) return false;
 
   return (

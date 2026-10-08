@@ -26,3 +26,7 @@ export const draftCleanupDaysSchema = z
 export const updateAIDraftCleanupSettingsBody = z.object({
   cleanupDays: draftCleanupDaysSchema.nullable(),
 });
+
+export const resetAnalyticsBody = z.object({
+  confirmDelete: z.boolean().default(false),
+});

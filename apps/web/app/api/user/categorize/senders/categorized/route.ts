@@ -12,9 +12,13 @@ async function getCategorizedSenders({
 }: {
   emailAccountId: string;
 }) {
+  const activeSenders = await getActiveSenderIds(emailAccountId);
   const [senders, categories, emailAccount] = await Promise.all([
     prisma.newsletter.findMany({
-      where: { emailAccountId, categoryId: { not: null } },
+      where: {
+        emailAccountId,
+        id: { in: activeSenders.map((sender) => sender.id) },
+      },
       select: {
         id: true,
         email: true,
@@ -44,3 +48,20 @@ export const GET = withEmailAccount(
     return NextResponse.json(result);
   },
 );
+
+async function getActiveSenderIds(emailAccountId: string) {
+  return prisma.$queryRaw<{ id: string }[]>`
+    SELECT n."id" FROM "Newsletter" n
+    WHERE n."emailAccountId" = ${emailAccountId}
+      AND EXISTS (
+        SELECT 1 FROM "EmailMessage" m
+        WHERE m."emailAccountId" = n."emailAccountId"
+          AND LOWER(m."from") = LOWER(n."email")
+          AND m."sent" = false AND m."draft" = false
+          AND m."removedAt" IS NULL
+          AND LOWER(m."from") <> (
+            SELECT LOWER("email") FROM "EmailAccount" WHERE "id" = ${emailAccountId}
+          )
+      )
+  `;
+}

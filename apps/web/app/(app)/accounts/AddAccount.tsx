@@ -9,6 +9,7 @@ import { MutedText } from "@/components/Typography";
 import { getAccountLinkingUrl } from "@/utils/account-linking";
 import { isGoogleProvider } from "@/utils/email/provider-types";
 import { redirectToSafeUrl } from "@/utils/redirect";
+import { ThunderbirdConnect } from "@/app/(app)/accounts/ThunderbirdConnect";
 import { SmarterMailConnect } from "@/app/(app)/accounts/SmarterMailConnect";
 
 export function AddAccount({
@@ -79,6 +80,7 @@ export function AddAccount({
       </div>
 
       <SmarterMailConnect />
+      <ThunderbirdConnect />
       <MutedText>{helperText}</MutedText>
     </div>
   );

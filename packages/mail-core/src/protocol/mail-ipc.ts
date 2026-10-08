@@ -84,7 +84,9 @@ export const mailIpcRequestSchema = z.discriminatedUnion("method", [
     method: z.literal("requestSync"),
     payload: z.object({
       accountIds: z.array(accountIdSchema).min(1),
-      provider: z.enum(["google", "microsoft", "smartermail"]).optional(),
+      provider: z
+        .enum(["google", "microsoft", "smartermail", "thunderbird"])
+        .optional(),
     }),
   }),
   z.object({

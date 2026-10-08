@@ -1,7 +1,11 @@
 import "server-only";
+import { setTimeout as delay } from "node:timers/promises";
 import { getSmarterMailLocalSyncContext } from "@/utils/smartermail/local-sync-context";
-import { withLocalMailSyncBudget } from "@/utils/email/local-mail-sync-budget";
-import { SmarterMailApiError } from "./errors";
+import {
+  LocalMailSyncPausedError,
+  withLocalMailSyncBudget,
+} from "@/utils/email/local-mail-sync-budget";
+import { SmarterMailApiError, SmarterMailMessageNotFoundError } from "./errors";
 
 export class SmarterMailTransport {
   private readonly baseUrl: string;
@@ -41,23 +45,37 @@ export class SmarterMailTransport {
   ): Promise<unknown> {
     const localSync = getSmarterMailLocalSyncContext();
     if (localSync) {
-      localSync.signal.throwIfAborted();
-      return withLocalMailSyncBudget(
-        {
-          emailAccountId: localSync.emailAccountId,
-          provider: "smartermail",
-          priority: localSync.priority,
-          cost: 1,
-        },
-        (budgetSignal) =>
-          this.performRequest(
-            path,
-            method,
-            body,
-            accessToken,
-            AbortSignal.any([localSync.signal, budgetSignal]),
-          ),
-      );
+      while (true) {
+        localSync.signal.throwIfAborted();
+        let started = false;
+        try {
+          return await withLocalMailSyncBudget(
+            {
+              emailAccountId: localSync.emailAccountId,
+              provider: "smartermail",
+              priority: localSync.priority,
+              cost: 1,
+            },
+            (budgetSignal) => {
+              started = true;
+              return this.performRequest(
+                path,
+                method,
+                body,
+                accessToken,
+                AbortSignal.any([localSync.signal, budgetSignal]),
+              );
+            },
+          );
+        } catch (error) {
+          // Wait only for admission: a provider request that started is never replayed here.
+          if (!(error instanceof LocalMailSyncPausedError) || started)
+            throw error;
+          await delay(error.retryAfterMs, undefined, {
+            signal: localSync.signal,
+          });
+        }
+      }
     }
     return this.performRequest(path, method, body, accessToken);
   }
@@ -95,6 +113,16 @@ export class SmarterMailTransport {
       );
     }
     if (!response.ok) {
+      if (path === "mail/message" && response.status === 400) {
+        let missing = false;
+        try {
+          const payload = await response.json();
+          missing =
+            payload?.success === false &&
+            payload?.message === "The message was not found.";
+        } catch {}
+        if (missing) throw new SmarterMailMessageNotFoundError();
+      }
       // Raw server errors can contain mail content or credentials.
       throw new SmarterMailApiError(
         `SmarterMail request failed (${response.status})`,

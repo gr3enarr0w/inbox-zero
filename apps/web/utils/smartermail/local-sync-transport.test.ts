@@ -3,7 +3,9 @@ import { SmarterMailTransport } from "./transport";
 import { withSmarterMailLocalSyncContext } from "./local-sync-context";
 import { withLocalMailSyncBudget } from "@/utils/email/local-mail-sync-budget";
 
-vi.mock("@/utils/email/local-mail-sync-budget", () => ({
+vi.mock("@/utils/redis", () => ({ redis: { eval: vi.fn() } }));
+vi.mock("@/utils/email/local-mail-sync-budget", async (original) => ({
+  ...(await original<typeof import("@/utils/email/local-mail-sync-budget")>()),
   withLocalMailSyncBudget: vi.fn(),
 }));
 const fetchMock = vi.fn();
@@ -39,7 +41,7 @@ describe("SmarterMail local sync HTTP admission", () => {
     );
   });
 
-  it("does not contact the mail server when admission is denied", async () => {
+  it("fails without contacting the mail server for unexpected admission errors", async () => {
     vi.mocked(withLocalMailSyncBudget).mockRejectedValueOnce(
       new Error("paused"),
     );
